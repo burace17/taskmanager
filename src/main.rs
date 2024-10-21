@@ -1,4 +1,4 @@
-use std::{ffi::c_void, ptr::addr_of_mut};
+use std::{cell::RefCell, ffi::c_void, ptr::addr_of_mut, rc::Rc};
 
 use widestring::U16CString;
 use windows::{
@@ -9,14 +9,18 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::{
-                LVCFMT_LEFT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_TEXT, LVITEMW, LVM_DELETEALLITEMS, LVM_INSERTCOLUMN, LVM_INSERTITEM, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEM, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT, LVS_REPORT, WC_LISTVIEWW
+                LVCFMT_LEFT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_TEXT,
+                LVITEMW, LVM_DELETEALLITEMS, LVM_INSERTCOLUMN, LVM_INSERTITEM,
+                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEM, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT,
+                LVS_REPORT, WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-                GetMessageW, LoadAcceleratorsW, LoadCursorW, MoveWindow, PostQuitMessage,
-                RegisterClassExW, SendMessageW, ShowWindow, TranslateAcceleratorW,
-                TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HMENU, IDC_ARROW, MSG,
-                SW_SHOW, WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WNDCLASSEXW,
+                GetMessageW, GetWindowLongPtrW, KillTimer, LoadAcceleratorsW, LoadCursorW,
+                MoveWindow, PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer,
+                SetWindowLongPtrW, ShowWindow, TranslateAcceleratorW, TranslateMessage, CS_HREDRAW,
+                CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW, MSG, SW_SHOW,
+                WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_TIMER, WNDCLASSEXW,
                 WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
             },
         },
@@ -37,7 +41,20 @@ impl WindowHandle {
     }
 }
 
+struct TaskManagerState {
+    listview: WindowHandle,
+}
+
+unsafe fn get_task_manager_state(hwnd: &WindowHandle) -> Rc<RefCell<TaskManagerState>> {
+    let app_state_ptr =
+        GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>;
+    let app_state = Rc::from_raw(app_state_ptr);
+    Rc::increment_strong_count(app_state_ptr);
+    app_state
+}
+
 const ID_LISTVIEW: i32 = 2000;
+const ID_UPDATE_TIMER: u32 = 2001;
 
 unsafe fn register_class(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     let wc = WNDCLASSEXW {
@@ -179,7 +196,7 @@ fn listview_add_process(listview: &WindowHandle, process_name: &mut U16CString, 
 }
 
 fn listview_clear(listview: &WindowHandle) {
-    unsafe { SendMessageW(listview.0, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0))};
+    unsafe { SendMessageW(listview.0, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0)) };
 }
 
 fn refresh_process_list(listview: &WindowHandle) {
@@ -210,24 +227,41 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe {
-        let window_handle = WindowHandle::new(hwnd);
-        match msg {
-            WM_CREATE => {
-                let instance = GetModuleHandleW(None).expect("shouldn't fail");
-                let list_hwnd = create_listview(&instance, &window_handle).expect("shouldn't fail");
-                init_listview(&list_hwnd);
-                refresh_process_list(&list_hwnd);
-                LRESULT(0)
-            }
-            WM_COMMAND => handle_wm_command(window_handle, msg, wparam, lparam),
-            WM_DESTROY => {
-                PostQuitMessage(0);
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let window_handle = WindowHandle::new(hwnd);
+    match msg {
+        WM_CREATE => {
+            let instance = GetModuleHandleW(None).expect("shouldn't fail");
+            let list_hwnd = create_listview(&instance, &window_handle).expect("shouldn't fail");
+            init_listview(&list_hwnd);
+            refresh_process_list(&list_hwnd);
+            let app_state = Rc::new(RefCell::new(TaskManagerState {
+                listview: list_hwnd,
+            }));
+            let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
+
+            SetTimer(hwnd, ID_UPDATE_TIMER as usize, 1000, None);
+            LRESULT(0)
         }
+        WM_COMMAND => handle_wm_command(window_handle, msg, wparam, lparam),
+        WM_DESTROY => {
+            let _ = KillTimer(hwnd, ID_UPDATE_TIMER as usize);
+            let app_state = Rc::from_raw(
+                GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<TaskManagerState>
+            );
+            println!("app ref count = {} ", Rc::strong_count(&app_state));
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            drop(app_state);
+            PostQuitMessage(0);
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            let app_state = get_task_manager_state(&window_handle);
+            refresh_process_list(&app_state.borrow().listview);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
 
