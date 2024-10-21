@@ -1,5 +1,6 @@
-use std::{cell::RefCell, ffi::c_void, ptr::addr_of_mut, rc::Rc};
+use std::{cell::RefCell, cmp::min, ffi::c_void, mem::transmute, ptr::addr_of_mut, rc::Rc};
 
+use process::Process;
 use widestring::U16CString;
 use windows::{
     core::{w, Result, PCWSTR, PWSTR},
@@ -9,10 +10,11 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::{
-                LVCFMT_LEFT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_TEXT,
-                LVITEMW, LVM_DELETEALLITEMS, LVM_INSERTCOLUMN, LVM_INSERTITEM,
-                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEM, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT,
-                LVS_REPORT, WC_LISTVIEWW,
+                LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH,
+                LVCOLUMNW, LVIF_TEXT, LVM_INSERTCOLUMN, LVM_SETEXTENDEDLISTVIEWSTYLE,
+                LVM_SETITEMCOUNT, LVN_GETDISPINFO, LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL,
+                LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, NMHDR,
+                NMLVDISPINFOW, WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
@@ -20,8 +22,9 @@ use windows::{
                 MoveWindow, PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer,
                 SetWindowLongPtrW, ShowWindow, TranslateAcceleratorW, TranslateMessage, CS_HREDRAW,
                 CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW, MSG, SW_SHOW,
-                WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_TIMER, WNDCLASSEXW,
-                WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+                WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
+                WNDCLASSEXW, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW,
+                WS_TABSTOP, WS_VISIBLE,
             },
         },
     },
@@ -43,8 +46,10 @@ impl WindowHandle {
 
 struct TaskManagerState {
     listview: WindowHandle,
+    processes: Vec<Process>,
 }
 
+// safety: SetWindowLongPtr needs to have been called to store the state prior to this
 unsafe fn get_task_manager_state(hwnd: &WindowHandle) -> Rc<RefCell<TaskManagerState>> {
     let app_state_ptr =
         GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>;
@@ -95,7 +100,7 @@ unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
 
 unsafe fn create_listview(instance: &HMODULE, parent: &WindowHandle) -> Result<WindowHandle> {
     let style = WS_TABSTOP | WS_CHILD | WS_BORDER | WS_VISIBLE;
-    let lv_style = LVS_AUTOARRANGE | LVS_REPORT; // | LVS_OWNERDATA;
+    let lv_style = LVS_AUTOARRANGE | LVS_REPORT | LVS_OWNERDATA;
     let window_style = style | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(lv_style);
     let hwnd = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -118,7 +123,7 @@ unsafe fn create_listview(instance: &HMODULE, parent: &WindowHandle) -> Result<W
         LPARAM(LVS_EX_FULLROWSELECT as isize),
     );
     let handle = WindowHandle::new(hwnd);
-    resize_listview(&handle, &parent);
+    resize_listview(&handle, parent);
     Ok(handle)
 }
 
@@ -164,47 +169,51 @@ fn init_listview(listview: &WindowHandle) {
     listview_add_column(listview, "Name");
 }
 
-fn listview_add_process(listview: &WindowHandle, process_name: &mut U16CString, pid: u32) {
-    let item_text = PWSTR::from_raw(process_name.as_mut_ptr());
-    let mut item = LVITEMW {
-        mask: LVIF_TEXT,
-        pszText: item_text,
-        ..Default::default()
-    };
-    unsafe {
-        SendMessageW(
-            listview.0,
-            LVM_INSERTITEM,
-            WPARAM(0),
-            LPARAM(addr_of_mut!(item) as isize),
-        )
-    };
+unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
+    let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
+    //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
+    let code = (*lpnmh).code;
+    let app_state = get_task_manager_state(hwnd);
+    let processes = &app_state.borrow().processes;
 
-    let pid_s = pid.to_string();
-    let mut item_str2 = U16CString::from_str(pid_s).unwrap();
-    let item_text2 = PWSTR::from_raw(item_str2.as_mut_ptr());
-    item.pszText = item_text2;
-    item.iSubItem = 1;
-    unsafe {
-        SendMessageW(
-            listview.0,
-            LVM_SETITEM,
-            WPARAM(0),
-            LPARAM(addr_of_mut!(item) as isize),
-        )
-    };
-}
-
-fn listview_clear(listview: &WindowHandle) {
-    unsafe { SendMessageW(listview.0, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0)) };
-}
-
-fn refresh_process_list(listview: &WindowHandle) {
-    listview_clear(listview);
-    let mut processes = process::get_processes().unwrap();
-    for process in processes.iter_mut() {
-        listview_add_process(listview, &mut process.image_name, process.pid);
+    if code == LVN_GETDISPINFO {
+        let lpdi = transmute::<LPARAM, *const NMLVDISPINFOW>(lparam);
+        let lpdi = &(*lpdi);
+        let process = &processes[lpdi.item.iItem as usize];
+        if (lpdi.item.mask & LVIF_TEXT) != LIST_VIEW_ITEM_FLAGS(0) {
+            if lpdi.item.iSubItem != 0 {
+                let pid_s = process.pid.to_string();
+                let pid_wstr = U16CString::from_str(pid_s).unwrap();
+                let pid_size_bytes = pid_wstr.as_slice().len() + 1;
+                let len = min(lpdi.item.cchTextMax as usize, pid_size_bytes);
+                std::ptr::copy_nonoverlapping(pid_wstr.as_ptr(), lpdi.item.pszText.as_ptr(), len);
+            } else {
+                let process_name_size_bytes = process.image_name.as_slice().len() + 1;
+                let len = min(lpdi.item.cchTextMax as usize, process_name_size_bytes);
+                std::ptr::copy_nonoverlapping(
+                    process.image_name.as_ptr(),
+                    lpdi.item.pszText.as_ptr(),
+                    len,
+                );
+            }
+        }
     }
+}
+
+fn refresh_process_list(main_window: &WindowHandle) {
+    let app_state = unsafe { get_task_manager_state(main_window) };
+    let mut app_state = app_state.borrow_mut();
+    app_state.processes = process::get_processes().unwrap();
+
+    let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
+    unsafe {
+        SendMessageW(
+            app_state.listview.0,
+            LVM_SETITEMCOUNT,
+            WPARAM(app_state.processes.len()),
+            LPARAM(listview_behavior as isize),
+        )
+    };
 }
 
 fn main() -> Result<()> {
@@ -234,13 +243,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let instance = GetModuleHandleW(None).expect("shouldn't fail");
             let list_hwnd = create_listview(&instance, &window_handle).expect("shouldn't fail");
             init_listview(&list_hwnd);
-            refresh_process_list(&list_hwnd);
+
             let app_state = Rc::new(RefCell::new(TaskManagerState {
                 listview: list_hwnd,
+                processes: Vec::new(),
             }));
             let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
 
+            refresh_process_list(&window_handle);
             SetTimer(hwnd, ID_UPDATE_TIMER as usize, 1000, None);
             LRESULT(0)
         }
@@ -257,8 +268,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             LRESULT(0)
         }
         WM_TIMER => {
+            refresh_process_list(&window_handle);
+            LRESULT(0)
+        }
+        WM_NOTIFY => {
+            listview_notify(&window_handle, lparam);
+            LRESULT(0)
+        }
+        WM_SIZE => {
             let app_state = get_task_manager_state(&window_handle);
-            refresh_process_list(&app_state.borrow().listview);
+            resize_listview(&app_state.borrow().listview, &window_handle);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
