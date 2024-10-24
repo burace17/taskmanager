@@ -1,4 +1,7 @@
-use std::{cell::RefCell, cmp::min, ffi::c_void, mem::transmute, ptr::addr_of_mut, rc::Rc};
+use std::{
+    cell::RefCell, cmp::min, collections::HashMap, ffi::c_void, mem::transmute, ptr::addr_of_mut,
+    rc::Rc,
+};
 
 use process::Process;
 use widestring::U16CString;
@@ -7,14 +10,17 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM},
         Graphics::Gdi::UpdateWindow,
-        System::LibraryLoader::GetModuleHandleW,
+        System::{
+            LibraryLoader::GetModuleHandleW,
+            SystemInformation::{GetSystemInfo, SYSTEM_INFO},
+        },
         UI::{
             Controls::{
-                LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH,
-                LVCOLUMNW, LVIF_TEXT, LVM_INSERTCOLUMN, LVM_SETEXTENDEDLISTVIEWSTYLE,
-                LVM_SETITEMCOUNT, LVN_GETDISPINFO, LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL,
-                LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, NMHDR,
-                NMLVDISPINFOW, WC_LISTVIEWW,
+                LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT, LVCFMT_RIGHT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT,
+                LVCF_WIDTH, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_INSERTCOLUMN,
+                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVN_GETDISPINFO,
+                LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT,
+                LVS_OWNERDATA, LVS_REPORT, NMHDR, NMLVDISPINFOW, WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
@@ -34,6 +40,15 @@ use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
 
 mod process;
 mod resources;
+
+const ID_LISTVIEW: i32 = 2000;
+const ID_UPDATE_TIMER: u32 = 2001;
+
+const INDEX_NAME: i32 = 0;
+const INDEX_PID: i32 = 1;
+const INDEX_CPU: i32 = 2;
+const INDEX_MEMORY: i32 = 3;
+
 // Container for a valid window handle
 // Initialize with new()
 struct WindowHandle(HWND);
@@ -47,6 +62,8 @@ impl WindowHandle {
 struct TaskManagerState {
     listview: WindowHandle,
     processes: Vec<Process>,
+    pid_map: HashMap<u32, Process>,
+    num_cpus: u32,
 }
 
 // safety: SetWindowLongPtr needs to have been called to store the state prior to this
@@ -57,9 +74,6 @@ unsafe fn get_task_manager_state(hwnd: &WindowHandle) -> Rc<RefCell<TaskManagerS
     Rc::increment_strong_count(app_state_ptr);
     app_state
 }
-
-const ID_LISTVIEW: i32 = 2000;
-const ID_UPDATE_TIMER: u32 = 2001;
 
 unsafe fn register_class(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     let wc = WNDCLASSEXW {
@@ -144,12 +158,12 @@ fn resize_listview(listview: &WindowHandle, parent: &WindowHandle) {
     };
 }
 
-fn listview_add_column(listview: &WindowHandle, title: &str) {
+fn listview_add_column(listview: &WindowHandle, title: &str, order: i32, fmt: LVCOLUMNW_FORMAT) {
     let mut test = widestring::U16CString::from_str(title).unwrap();
     let header = PWSTR::from_raw(test.as_mut_ptr());
     let mut column = LVCOLUMNW {
         mask: LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM,
-        fmt: LVCFMT_LEFT,
+        fmt,
         cx: 120,
         pszText: header,
         ..Default::default()
@@ -158,15 +172,28 @@ fn listview_add_column(listview: &WindowHandle, title: &str) {
         SendMessageW(
             listview.0,
             LVM_INSERTCOLUMN,
-            WPARAM(0),
+            WPARAM(order as usize),
             LPARAM(addr_of_mut!(column) as isize),
         )
     };
 }
 
 fn init_listview(listview: &WindowHandle) {
-    listview_add_column(listview, "PID");
-    listview_add_column(listview, "Name");
+    listview_add_column(listview, "Name", INDEX_NAME, LVCFMT_LEFT);
+    listview_add_column(listview, "PID", INDEX_PID, LVCFMT_LEFT);
+    listview_add_column(listview, "CPU", INDEX_CPU, LVCFMT_RIGHT);
+    listview_add_column(listview, "Memory", INDEX_MEMORY, LVCFMT_RIGHT);
+}
+
+unsafe fn copy_string_to_buffer(s: &str, buffer: PWSTR, buffer_size: i32) {
+    let wstr = U16CString::from_str(s).unwrap();
+    copy_wstring_to_buffer(&wstr, buffer, buffer_size);
+}
+
+unsafe fn copy_wstring_to_buffer(wstr: &U16CString, buffer: PWSTR, buffer_size: i32) {
+    let wstr_size_bytes = wstr.as_slice().len() + 1;
+    let len = min(buffer_size as usize, wstr_size_bytes);
+    std::ptr::copy_nonoverlapping(wstr.as_ptr(), buffer.as_ptr(), len);
 }
 
 unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
@@ -181,20 +208,28 @@ unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
         let lpdi = &(*lpdi);
         let process = &processes[lpdi.item.iItem as usize];
         if (lpdi.item.mask & LVIF_TEXT) != LIST_VIEW_ITEM_FLAGS(0) {
-            if lpdi.item.iSubItem != 0 {
-                let pid_s = process.pid.to_string();
-                let pid_wstr = U16CString::from_str(pid_s).unwrap();
-                let pid_size_bytes = pid_wstr.as_slice().len() + 1;
-                let len = min(lpdi.item.cchTextMax as usize, pid_size_bytes);
-                std::ptr::copy_nonoverlapping(pid_wstr.as_ptr(), lpdi.item.pszText.as_ptr(), len);
-            } else {
-                let process_name_size_bytes = process.image_name.as_slice().len() + 1;
-                let len = min(lpdi.item.cchTextMax as usize, process_name_size_bytes);
-                std::ptr::copy_nonoverlapping(
-                    process.image_name.as_ptr(),
-                    lpdi.item.pszText.as_ptr(),
-                    len,
-                );
+            match lpdi.item.iSubItem {
+                INDEX_NAME => {
+                    copy_wstring_to_buffer(
+                        &process.image_name,
+                        lpdi.item.pszText,
+                        lpdi.item.cchTextMax,
+                    );
+                }
+                INDEX_PID => {
+                    let pid_s = process.pid.to_string();
+                    copy_string_to_buffer(&pid_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+                }
+                INDEX_CPU => {
+                    let cpu_s = process.cpu_usage.to_string();
+                    copy_string_to_buffer(&cpu_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+                }
+                INDEX_MEMORY => {
+                    let mut ws_s = (process.private_working_set / 1024).to_string();
+                    ws_s.push_str(" K");
+                    copy_string_to_buffer(&ws_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+                }
+                _ => unreachable!(),
             }
         }
     }
@@ -203,7 +238,17 @@ unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
 fn refresh_process_list(main_window: &WindowHandle) {
     let app_state = unsafe { get_task_manager_state(main_window) };
     let mut app_state = app_state.borrow_mut();
-    app_state.processes = process::get_processes().unwrap();
+    let mut new_processes = process::get_processes().unwrap();
+    let mut new_pid_map = HashMap::new();
+    for process in new_processes.iter_mut() {
+        new_pid_map.insert(process.pid, process.clone());
+        if let Some(old_process) = app_state.pid_map.get(&process.pid) {
+            process.cpu_usage = process::get_cpu_usage(old_process, process, app_state.num_cpus);
+        }
+    }
+
+    app_state.processes = new_processes;
+    app_state.pid_map = new_pid_map;
 
     let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
     unsafe {
@@ -244,15 +289,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let list_hwnd = create_listview(&instance, &window_handle).expect("shouldn't fail");
             init_listview(&list_hwnd);
 
+            let mut system_info = SYSTEM_INFO::default();
+            GetSystemInfo(addr_of_mut!(system_info));
+
             let app_state = Rc::new(RefCell::new(TaskManagerState {
                 listview: list_hwnd,
                 processes: Vec::new(),
+                pid_map: HashMap::new(),
+                num_cpus: system_info.dwNumberOfProcessors,
             }));
             let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
 
             refresh_process_list(&window_handle);
-            SetTimer(hwnd, ID_UPDATE_TIMER as usize, 1000, None);
+            SetTimer(hwnd, ID_UPDATE_TIMER as usize, 500, None);
             LRESULT(0)
         }
         WM_COMMAND => handle_wm_command(window_handle, msg, wparam, lparam),
