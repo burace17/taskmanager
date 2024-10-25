@@ -18,9 +18,9 @@ use windows::{
             Controls::{
                 LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT, LVCFMT_RIGHT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT,
                 LVCF_WIDTH, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_INSERTCOLUMN,
-                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVN_GETDISPINFO,
+                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVN_COLUMNCLICK, LVN_GETDISPINFO,
                 LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT,
-                LVS_OWNERDATA, LVS_REPORT, NMHDR, NMLVDISPINFOW, WC_LISTVIEWW,
+                LVS_OWNERDATA, LVS_REPORT, NMHDR, NMLISTVIEW, NMLVDISPINFOW, WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
@@ -96,12 +96,12 @@ unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE::default(),
         *name,
-        w!("Sample window"),
+        w!("taskmgr--"),
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        800,
+        600,
         None,
         None,
         *instance,
@@ -158,13 +158,19 @@ fn resize_listview(listview: &WindowHandle, parent: &WindowHandle) {
     };
 }
 
-fn listview_add_column(listview: &WindowHandle, title: &str, order: i32, fmt: LVCOLUMNW_FORMAT) {
+fn listview_add_column(
+    listview: &WindowHandle,
+    title: &str,
+    order: i32,
+    width: i32,
+    fmt: LVCOLUMNW_FORMAT,
+) {
     let mut test = widestring::U16CString::from_str(title).unwrap();
     let header = PWSTR::from_raw(test.as_mut_ptr());
     let mut column = LVCOLUMNW {
         mask: LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM,
         fmt,
-        cx: 120,
+        cx: width,
         pszText: header,
         ..Default::default()
     };
@@ -179,10 +185,10 @@ fn listview_add_column(listview: &WindowHandle, title: &str, order: i32, fmt: LV
 }
 
 fn init_listview(listview: &WindowHandle) {
-    listview_add_column(listview, "Name", INDEX_NAME, LVCFMT_LEFT);
-    listview_add_column(listview, "PID", INDEX_PID, LVCFMT_LEFT);
-    listview_add_column(listview, "CPU", INDEX_CPU, LVCFMT_RIGHT);
-    listview_add_column(listview, "Memory", INDEX_MEMORY, LVCFMT_RIGHT);
+    listview_add_column(listview, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
+    listview_add_column(listview, "PID", INDEX_PID, 50, LVCFMT_LEFT);
+    listview_add_column(listview, "CPU", INDEX_CPU, 50, LVCFMT_RIGHT);
+    listview_add_column(listview, "Memory", INDEX_MEMORY, 90, LVCFMT_RIGHT);
 }
 
 unsafe fn copy_string_to_buffer(s: &str, buffer: PWSTR, buffer_size: i32) {
@@ -196,42 +202,52 @@ unsafe fn copy_wstring_to_buffer(wstr: &U16CString, buffer: PWSTR, buffer_size: 
     std::ptr::copy_nonoverlapping(wstr.as_ptr(), buffer.as_ptr(), len);
 }
 
+unsafe fn listview_get_display_info(hwnd: &WindowHandle, lparam: LPARAM) {
+    let lpdi = transmute::<LPARAM, *const NMLVDISPINFOW>(lparam);
+    let lpdi = &(*lpdi);
+    if (lpdi.item.mask & LVIF_TEXT) == LIST_VIEW_ITEM_FLAGS(0) {
+        return;
+    }
+
+    let app_state = get_task_manager_state(hwnd);
+    let processes = &app_state.borrow().processes;
+    let process = &processes[lpdi.item.iItem as usize];
+
+    match lpdi.item.iSubItem {
+        INDEX_NAME => {
+            copy_wstring_to_buffer(&process.image_name, lpdi.item.pszText, lpdi.item.cchTextMax);
+        }
+        INDEX_PID => {
+            let pid_s = process.pid.to_string();
+            copy_string_to_buffer(&pid_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+        }
+        INDEX_CPU => {
+            let cpu_s = process.cpu_usage.to_string();
+            copy_string_to_buffer(&cpu_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+        }
+        INDEX_MEMORY => {
+            let mut ws_s = (process.private_working_set / 1024).to_string();
+            ws_s.push_str(" K");
+            copy_string_to_buffer(&ws_s, lpdi.item.pszText, lpdi.item.cchTextMax);
+        }
+        _ => unreachable!(),
+    }
+}
+
+unsafe fn listview_column_click(_hwnd: &WindowHandle, lparam: LPARAM) {
+    let lpdi = transmute::<LPARAM, *const NMLISTVIEW>(lparam);
+    let lpdi = &(*lpdi);
+    println!("column click: {}", lpdi.iSubItem);
+}
+
 unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
     let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
     //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
     let code = (*lpnmh).code;
-    let app_state = get_task_manager_state(hwnd);
-    let processes = &app_state.borrow().processes;
-
-    if code == LVN_GETDISPINFO {
-        let lpdi = transmute::<LPARAM, *const NMLVDISPINFOW>(lparam);
-        let lpdi = &(*lpdi);
-        let process = &processes[lpdi.item.iItem as usize];
-        if (lpdi.item.mask & LVIF_TEXT) != LIST_VIEW_ITEM_FLAGS(0) {
-            match lpdi.item.iSubItem {
-                INDEX_NAME => {
-                    copy_wstring_to_buffer(
-                        &process.image_name,
-                        lpdi.item.pszText,
-                        lpdi.item.cchTextMax,
-                    );
-                }
-                INDEX_PID => {
-                    let pid_s = process.pid.to_string();
-                    copy_string_to_buffer(&pid_s, lpdi.item.pszText, lpdi.item.cchTextMax);
-                }
-                INDEX_CPU => {
-                    let cpu_s = process.cpu_usage.to_string();
-                    copy_string_to_buffer(&cpu_s, lpdi.item.pszText, lpdi.item.cchTextMax);
-                }
-                INDEX_MEMORY => {
-                    let mut ws_s = (process.private_working_set / 1024).to_string();
-                    ws_s.push_str(" K");
-                    copy_string_to_buffer(&ws_s, lpdi.item.pszText, lpdi.item.cchTextMax);
-                }
-                _ => unreachable!(),
-            }
-        }
+    match code {
+        LVN_GETDISPINFO => listview_get_display_info(hwnd, lparam),
+        LVN_COLUMNCLICK => listview_column_click(hwnd, lparam),
+        _ => {}
     }
 }
 
