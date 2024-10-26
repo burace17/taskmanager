@@ -38,10 +38,12 @@ mod task_list;
 
 // Container for a valid window handle
 // Initialize with new()
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowHandle(HWND);
 
 impl WindowHandle {
-    pub unsafe fn new(hwnd: HWND) -> Self {
+    pub(crate) unsafe fn new(hwnd: HWND) -> Self {
         Self(hwnd)
     }
 }
@@ -54,7 +56,7 @@ pub struct TaskManagerState {
 }
 
 // safety: SetWindowLongPtr needs to have been called to store the state prior to this
-pub unsafe fn get_task_manager_state(hwnd: &WindowHandle) -> Rc<RefCell<TaskManagerState>> {
+pub(crate) unsafe fn get_task_manager_state(hwnd: WindowHandle) -> Rc<RefCell<TaskManagerState>> {
     let app_state_ptr =
         GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>;
     let app_state = Rc::from_raw(app_state_ptr);
@@ -99,18 +101,7 @@ unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     Ok(())
 }
 
-unsafe fn handle_wm_notify(hwnd: &WindowHandle, lparam: LPARAM) {
-    let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
-    //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
-    let code = (*lpnmh).code;
-    match code {
-        LVN_GETDISPINFO => task_list::on_get_display_info(hwnd, lparam),
-        LVN_COLUMNCLICK => task_list::on_column_click(hwnd, lparam),
-        _ => {}
-    }
-}
-
-fn refresh_process_list(main_window: &WindowHandle) {
+fn refresh_process_list(main_window: WindowHandle) {
     let app_state = unsafe { get_task_manager_state(main_window) };
     let mut app_state = app_state.borrow_mut();
     let mut new_processes = process::get_processes().unwrap();
@@ -157,64 +148,61 @@ fn main() -> Result<()> {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let window_handle = WindowHandle::new(hwnd);
+    let hwnd = WindowHandle::new(hwnd);
     match msg {
-        WM_CREATE => {
-            let instance = GetModuleHandleW(None).expect("shouldn't fail");
-            let list_hwnd =
-                task_list::create_control(&instance, &window_handle).expect("shouldn't fail");
-
-            let mut system_info = SYSTEM_INFO::default();
-            GetSystemInfo(&mut system_info);
-
-            let app_state = Rc::new(RefCell::new(TaskManagerState {
-                listview: list_hwnd,
-                processes: Vec::new(),
-                pid_map: HashMap::new(),
-                num_cpus: system_info.dwNumberOfProcessors,
-            }));
-            let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
-
-            refresh_process_list(&window_handle);
-            SetTimer(hwnd, ID_UPDATE_TIMER as usize, 500, None);
-            LRESULT(0)
-        }
-        WM_COMMAND => handle_wm_command(window_handle, msg, wparam, lparam),
-        WM_DESTROY => {
-            let _ = KillTimer(hwnd, ID_UPDATE_TIMER as usize);
-            let app_state = Rc::from_raw(
-                GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<TaskManagerState>
-            );
-            println!("app ref count = {} ", Rc::strong_count(&app_state));
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            drop(app_state);
-            PostQuitMessage(0);
-            LRESULT(0)
-        }
-        WM_TIMER => {
-            refresh_process_list(&window_handle);
-            LRESULT(0)
-        }
-        WM_NOTIFY => {
-            handle_wm_notify(&window_handle, lparam);
-            LRESULT(0)
-        }
-        WM_SIZE => {
-            let app_state = get_task_manager_state(&window_handle);
-            task_list::resize_to_parent(&app_state.borrow().listview, &window_handle);
-            LRESULT(0)
-        }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        WM_CREATE => on_wm_create(hwnd),
+        WM_COMMAND => on_wm_command(hwnd, msg, wparam, lparam),
+        WM_DESTROY => on_wm_destroy(hwnd),
+        WM_TIMER => on_wm_timer(hwnd),
+        WM_NOTIFY => on_wm_notify(hwnd, lparam),
+        WM_SIZE => on_wm_size(hwnd),
+        _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
 }
 
-unsafe fn handle_wm_command(
-    hwnd: WindowHandle,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
+    unsafe {
+        let instance = GetModuleHandleW(None).expect("shouldn't fail");
+        let list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
+
+        let mut system_info = SYSTEM_INFO::default();
+        GetSystemInfo(&mut system_info);
+
+        let app_state = Rc::new(RefCell::new(TaskManagerState {
+            listview: list_hwnd,
+            processes: Vec::new(),
+            pid_map: HashMap::new(),
+            num_cpus: system_info.dwNumberOfProcessors,
+        }));
+        let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
+        SetWindowLongPtrW(hwnd.0, GWLP_USERDATA, app_state_ptr as isize);
+
+        refresh_process_list(hwnd);
+        SetTimer(hwnd.0, ID_UPDATE_TIMER as usize, 500, None);
+    }
+    LRESULT(0)
+}
+
+fn on_wm_destroy(hwnd: WindowHandle) -> LRESULT {
+    unsafe {
+        let _ = KillTimer(hwnd.0, ID_UPDATE_TIMER as usize);
+        let app_state = Rc::from_raw(
+            GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>
+        );
+        println!("app ref count = {} ", Rc::strong_count(&app_state));
+        SetWindowLongPtrW(hwnd.0, GWLP_USERDATA, 0);
+        drop(app_state);
+        PostQuitMessage(0);
+        LRESULT(0)
+    }
+}
+
+fn on_wm_timer(hwnd: WindowHandle) -> LRESULT {
+    refresh_process_list(hwnd);
+    LRESULT(0)
+}
+
+unsafe fn on_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let id = (wparam.0 & 0xffff) as u16;
     match id {
         resources::IDM_NEW_TASK => {
@@ -229,4 +217,23 @@ unsafe fn handle_wm_command(
         }
         _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
+}
+
+unsafe fn on_wm_notify(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
+    let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
+    //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
+    let code = (*lpnmh).code;
+    match code {
+        LVN_GETDISPINFO => task_list::on_get_display_info(hwnd, lparam),
+        LVN_COLUMNCLICK => task_list::on_column_click(hwnd, lparam),
+        _ => {}
+    }
+    LRESULT(0)
+}
+
+fn on_wm_size(hwnd: WindowHandle) -> LRESULT {
+    // safety: WM_CREATE will ensure the state has been stored in the window first
+    let app_state = unsafe { get_task_manager_state(hwnd) };
+    task_list::resize_to_parent(app_state.borrow().listview, hwnd);
+    LRESULT(0)
 }

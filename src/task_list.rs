@@ -28,7 +28,7 @@ const INDEX_PID: i32 = 1;
 const INDEX_CPU: i32 = 2;
 const INDEX_MEMORY: i32 = 3;
 
-pub unsafe fn create_control(instance: &HMODULE, parent: &WindowHandle) -> Result<WindowHandle> {
+pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<WindowHandle> {
     let style = WS_TABSTOP | WS_CHILD | WS_BORDER | WS_VISIBLE;
     let lv_style = LVS_AUTOARRANGE | LVS_REPORT | LVS_OWNERDATA;
     let window_style = style | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(lv_style);
@@ -55,17 +55,17 @@ pub unsafe fn create_control(instance: &HMODULE, parent: &WindowHandle) -> Resul
     );
 
     let handle = WindowHandle::new(hwnd);
-    resize_to_parent(&handle, parent);
+    resize_to_parent(handle, parent);
 
-    add_column(&handle, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
-    add_column(&handle, "PID", INDEX_PID, 50, LVCFMT_LEFT);
-    add_column(&handle, "CPU", INDEX_CPU, 50, LVCFMT_RIGHT);
-    add_column(&handle, "Memory", INDEX_MEMORY, 90, LVCFMT_RIGHT);
+    add_column(handle, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
+    add_column(handle, "PID", INDEX_PID, 50, LVCFMT_LEFT);
+    add_column(handle, "CPU", INDEX_CPU, 50, LVCFMT_RIGHT);
+    add_column(handle, "Memory", INDEX_MEMORY, 90, LVCFMT_RIGHT);
 
     Ok(handle)
 }
 
-pub fn resize_to_parent(listview: &WindowHandle, parent: &WindowHandle) {
+pub fn resize_to_parent(listview: WindowHandle, parent: WindowHandle) {
     let mut rect = RECT::default();
     unsafe {
         let _ = GetClientRect(parent.0, &mut rect);
@@ -82,7 +82,7 @@ pub fn resize_to_parent(listview: &WindowHandle, parent: &WindowHandle) {
     };
 }
 
-pub unsafe fn on_get_display_info(hwnd: &WindowHandle, lparam: LPARAM) {
+pub unsafe fn on_get_display_info(hwnd: WindowHandle, lparam: LPARAM) {
     let lpdi = transmute::<LPARAM, *const NMLVDISPINFOW>(lparam);
     let lpdi = &(*lpdi);
     if (lpdi.item.mask & LVIF_TEXT) == LIST_VIEW_ITEM_FLAGS(0) {
@@ -114,13 +114,13 @@ pub unsafe fn on_get_display_info(hwnd: &WindowHandle, lparam: LPARAM) {
     }
 }
 
-pub unsafe fn on_column_click(_hwnd: &WindowHandle, lparam: LPARAM) {
+pub unsafe fn on_column_click(_hwnd: WindowHandle, lparam: LPARAM) {
     let lpdi = transmute::<LPARAM, *const NMLISTVIEW>(lparam);
     let lpdi = &(*lpdi);
     println!("column click: {}", lpdi.iSubItem);
 }
 
-fn add_column(listview: &WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
+fn add_column(listview: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
     let mut test = widestring::U16CString::from_str(title).unwrap();
     let header = PWSTR::from_raw(test.as_mut_ptr());
     let mut column = LVCOLUMNW {
