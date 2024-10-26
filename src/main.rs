@@ -40,6 +40,7 @@ use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
 
 mod process;
 mod resources;
+mod run_dialog;
 
 const ID_LISTVIEW: i32 = 2000;
 const ID_UPDATE_TIMER: u32 = 2001;
@@ -240,7 +241,7 @@ unsafe fn listview_column_click(_hwnd: &WindowHandle, lparam: LPARAM) {
     println!("column click: {}", lpdi.iSubItem);
 }
 
-unsafe fn listview_notify(hwnd: &WindowHandle, lparam: LPARAM) {
+unsafe fn handle_wm_notify(hwnd: &WindowHandle, lparam: LPARAM) {
     let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
     //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
     let code = (*lpnmh).code;
@@ -338,7 +339,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             LRESULT(0)
         }
         WM_NOTIFY => {
-            listview_notify(&window_handle, lparam);
+            handle_wm_notify(&window_handle, lparam);
             LRESULT(0)
         }
         WM_SIZE => {
@@ -350,15 +351,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
-fn handle_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe fn handle_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let id = (wparam.0 & 0xffff) as u16;
     match id {
-        resources::IDM_EXIT => {
-            unsafe {
-                DestroyWindow(hwnd.0).unwrap();
+        resources::IDM_NEW_TASK => {
+            if let Err(err) = run_dialog::show(&hwnd) {
+                println!("run_file error: {}", err);
             }
             LRESULT(0)
         }
-        _ => unsafe { DefWindowProcW(hwnd.0, msg, wparam, lparam) },
+        resources::IDM_EXIT => {
+            DestroyWindow(hwnd.0).unwrap();
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
 }
