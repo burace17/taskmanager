@@ -8,5 +8,5 @@ pub const IDM_EXIT: u16 = 100;
 pub const IDC_TASKMANAGER: u16 = 101;
 pub const IDM_NEW_TASK: u16 = 104;
 
-pub const ID_LISTVIEW: i32 = 2000;
+pub const ID_TASK_LIST: i32 = 2000;
 pub const ID_UPDATE_TIMER: u32 = 2001;

@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::{process::Process, WindowHandle};
 
 pub struct TaskManagerState {
-    pub listview: WindowHandle,
+    pub task_list: WindowHandle,
     pub processes: Vec<Process>,
     pub pid_map: HashMap<u32, Process>,
     pub num_cpus: u32,
@@ -25,7 +25,7 @@ pub unsafe fn get(hwnd: WindowHandle) -> Rc<RefCell<TaskManagerState>> {
 // safety: GWLP_USERDATA for hwnd must be unset
 pub unsafe fn initialize(hwnd: WindowHandle, task_list_hwnd: WindowHandle, num_cpus: u32) {
     let app_state = Rc::new(RefCell::new(TaskManagerState {
-        listview: task_list_hwnd,
+        task_list: task_list_hwnd,
         processes: Vec::new(),
         pid_map: HashMap::new(),
         num_cpus,

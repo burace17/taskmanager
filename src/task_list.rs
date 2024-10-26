@@ -42,7 +42,7 @@ pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result
         0,
         0,
         parent.0,
-        HMENU(crate::resources::ID_LISTVIEW as *mut c_void),
+        HMENU(crate::resources::ID_TASK_LIST as *mut c_void),
         *instance,
         None,
     )?;
@@ -120,7 +120,7 @@ pub unsafe fn on_column_click(_hwnd: WindowHandle, lparam: LPARAM) {
     println!("column click: {}", lpdi.iSubItem);
 }
 
-fn add_column(listview: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
+fn add_column(task_list: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
     let mut test = widestring::U16CString::from_str(title).unwrap();
     let header = PWSTR::from_raw(test.as_mut_ptr());
     let mut column = LVCOLUMNW {
@@ -132,7 +132,7 @@ fn add_column(listview: WindowHandle, title: &str, order: i32, width: i32, fmt: 
     };
     unsafe {
         SendMessageW(
-            listview.0,
+            task_list.0,
             LVM_INSERTCOLUMN,
             WPARAM(order as usize),
             LPARAM(&raw mut column as isize),

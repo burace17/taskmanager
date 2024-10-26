@@ -87,7 +87,7 @@ fn refresh_process_list(main_window: WindowHandle) {
     let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
     unsafe {
         SendMessageW(
-            app_state.listview.0,
+            app_state.task_list.0,
             LVM_SETITEMCOUNT,
             WPARAM(app_state.processes.len()),
             LPARAM(listview_behavior as isize),
@@ -98,12 +98,12 @@ fn refresh_process_list(main_window: WindowHandle) {
 fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
     unsafe {
         let instance = GetModuleHandleW(None).expect("shouldn't fail");
-        let list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
+        let task_list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
 
         let mut system_info = SYSTEM_INFO::default();
         GetSystemInfo(&mut system_info);
 
-        state::initialize(hwnd, list_hwnd, system_info.dwNumberOfProcessors);
+        state::initialize(hwnd, task_list_hwnd, system_info.dwNumberOfProcessors);
 
         refresh_process_list(hwnd);
         SetTimer(hwnd.0, ID_UPDATE_TIMER as usize, 500, None);
@@ -162,6 +162,6 @@ unsafe fn on_wm_notify(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
 fn on_wm_size(hwnd: WindowHandle) -> LRESULT {
     // safety: WM_CREATE will ensure the state has been stored in the window first
     let app_state = unsafe { state::get(hwnd) };
-    task_list::resize_to_parent(app_state.borrow().listview, hwnd);
+    task_list::resize_to_parent(app_state.borrow().task_list, hwnd);
     LRESULT(0)
 }
