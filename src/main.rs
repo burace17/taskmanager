@@ -1,12 +1,12 @@
 use std::{cell::RefCell, collections::HashMap, mem::transmute, rc::Rc};
 
-use process::Process;
 use resources::ID_UPDATE_TIMER;
+use state::TaskManagerState;
+use window::WindowHandle;
 use windows::{
-    core::{w, Result, PCWSTR},
+    core::{w, Result},
     Win32::{
-        Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::UpdateWindow,
+        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
         System::{
             LibraryLoader::GetModuleHandleW,
             SystemInformation::{GetSystemInfo, SYSTEM_INFO},
@@ -17,13 +17,11 @@ use windows::{
                 LVSICF_NOSCROLL, NMHDR,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-                GetWindowLongPtrW, KillTimer, LoadAcceleratorsW, LoadCursorW, PostQuitMessage,
-                RegisterClassExW, SendMessageW, SetTimer, SetWindowLongPtrW, ShowWindow,
-                TranslateAcceleratorW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-                GWLP_USERDATA, IDC_ARROW, MSG, SW_SHOW, WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE,
-                WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
-                WS_VISIBLE,
+                DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
+                GetWindowLongPtrW, KillTimer, LoadAcceleratorsW, PostQuitMessage, SendMessageW, SetTimer, SetWindowLongPtrW,
+                TranslateAcceleratorW, TranslateMessage,
+                GWLP_USERDATA, MSG, WM_COMMAND, WM_CREATE,
+                WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -34,106 +32,17 @@ use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
 mod process;
 mod resources;
 mod run_dialog;
+mod state;
 mod task_list;
-
-// Container for a valid window handle
-// Initialize with new()
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowHandle(HWND);
-
-impl WindowHandle {
-    pub(crate) unsafe fn new(hwnd: HWND) -> Self {
-        Self(hwnd)
-    }
-}
-
-pub struct TaskManagerState {
-    listview: WindowHandle,
-    processes: Vec<Process>,
-    pid_map: HashMap<u32, Process>,
-    num_cpus: u32,
-}
-
-// safety: SetWindowLongPtr needs to have been called to store the state prior to this
-pub(crate) unsafe fn get_task_manager_state(hwnd: WindowHandle) -> Rc<RefCell<TaskManagerState>> {
-    let app_state_ptr =
-        GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>;
-    let app_state = Rc::from_raw(app_state_ptr);
-    Rc::increment_strong_count(app_state_ptr);
-    app_state
-}
-
-unsafe fn register_class(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
-    let wc = WNDCLASSEXW {
-        cbSize: size_of::<WNDCLASSEXW>() as u32,
-        style: CS_HREDRAW | CS_VREDRAW,
-        lpszClassName: *name,
-        hCursor: LoadCursorW(None, IDC_ARROW)?,
-        lpfnWndProc: Some(wndproc),
-        hInstance: (*instance).into(),
-        lpszMenuName: to_pcwstr(IDC_TASKMANAGER),
-        ..Default::default()
-    };
-
-    let atom = RegisterClassExW(&wc);
-    debug_assert!(atom != 0);
-    Ok(())
-}
-
-unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
-    let hwnd = CreateWindowExW(
-        WINDOW_EX_STYLE::default(),
-        *name,
-        w!("taskmgr--"),
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        800,
-        600,
-        None,
-        None,
-        *instance,
-        None,
-    )?;
-    let _ = ShowWindow(hwnd, SW_SHOW);
-    let _ = UpdateWindow(hwnd);
-    Ok(())
-}
-
-fn refresh_process_list(main_window: WindowHandle) {
-    let app_state = unsafe { get_task_manager_state(main_window) };
-    let mut app_state = app_state.borrow_mut();
-    let mut new_processes = process::get_processes().unwrap();
-    let mut new_pid_map = HashMap::new();
-    for process in new_processes.iter_mut() {
-        new_pid_map.insert(process.pid, process.clone());
-        if let Some(old_process) = app_state.pid_map.get(&process.pid) {
-            process.cpu_usage = process::get_cpu_usage(old_process, process, app_state.num_cpus);
-        }
-    }
-
-    app_state.processes = new_processes;
-    app_state.pid_map = new_pid_map;
-
-    let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
-    unsafe {
-        SendMessageW(
-            app_state.listview.0,
-            LVM_SETITEMCOUNT,
-            WPARAM(app_state.processes.len()),
-            LPARAM(listview_behavior as isize),
-        )
-    };
-}
+mod window;
 
 fn main() -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
 
         let window_class = w!("window");
-        register_class(&instance, &window_class)?;
-        create_window(&instance, &window_class)?;
+        window::register_class(&instance, &window_class, wndproc)?;
+        window::create_window(&instance, &window_class)?;
 
         let accel = LoadAcceleratorsW(instance, to_pcwstr(IDC_TASKMANAGER))?;
         let mut message = MSG::default();
@@ -160,6 +69,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+fn refresh_process_list(main_window: WindowHandle) {
+    let app_state = unsafe { state::get(main_window) };
+    let mut app_state = app_state.borrow_mut();
+    let mut new_processes = process::get_processes().unwrap();
+    let mut new_pid_map = HashMap::new();
+    for process in new_processes.iter_mut() {
+        new_pid_map.insert(process.pid, process.clone());
+        if let Some(old_process) = app_state.pid_map.get(&process.pid) {
+            process.cpu_usage = process::get_cpu_usage(old_process, process, app_state.num_cpus);
+        }
+    }
+
+    app_state.processes = new_processes;
+    app_state.pid_map = new_pid_map;
+
+    let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
+    unsafe {
+        SendMessageW(
+            app_state.listview.0,
+            LVM_SETITEMCOUNT,
+            WPARAM(app_state.processes.len()),
+            LPARAM(listview_behavior as isize),
+        )
+    };
+}
+
 fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
     unsafe {
         let instance = GetModuleHandleW(None).expect("shouldn't fail");
@@ -168,14 +103,7 @@ fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
         let mut system_info = SYSTEM_INFO::default();
         GetSystemInfo(&mut system_info);
 
-        let app_state = Rc::new(RefCell::new(TaskManagerState {
-            listview: list_hwnd,
-            processes: Vec::new(),
-            pid_map: HashMap::new(),
-            num_cpus: system_info.dwNumberOfProcessors,
-        }));
-        let app_state_ptr = Rc::<RefCell<TaskManagerState>>::into_raw(app_state);
-        SetWindowLongPtrW(hwnd.0, GWLP_USERDATA, app_state_ptr as isize);
+        state::initialize(hwnd, list_hwnd, system_info.dwNumberOfProcessors);
 
         refresh_process_list(hwnd);
         SetTimer(hwnd.0, ID_UPDATE_TIMER as usize, 500, None);
@@ -233,7 +161,7 @@ unsafe fn on_wm_notify(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
 
 fn on_wm_size(hwnd: WindowHandle) -> LRESULT {
     // safety: WM_CREATE will ensure the state has been stored in the window first
-    let app_state = unsafe { get_task_manager_state(hwnd) };
+    let app_state = unsafe { state::get(hwnd) };
     task_list::resize_to_parent(app_state.borrow().listview, hwnd);
     LRESULT(0)
 }

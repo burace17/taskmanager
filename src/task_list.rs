@@ -1,6 +1,6 @@
 use std::{cmp::min, ffi::c_void, mem::transmute};
 
-use crate::get_task_manager_state;
+use crate::state;
 use widestring::U16CString;
 use windows::{
     core::{w, Result, PWSTR},
@@ -21,7 +21,7 @@ use windows::{
     },
 };
 
-use crate::WindowHandle;
+use crate::window::WindowHandle;
 
 const INDEX_NAME: i32 = 0;
 const INDEX_PID: i32 = 1;
@@ -89,7 +89,7 @@ pub unsafe fn on_get_display_info(hwnd: WindowHandle, lparam: LPARAM) {
         return;
     }
 
-    let app_state = get_task_manager_state(hwnd);
+    let app_state = state::get(hwnd);
     let processes = &app_state.borrow().processes;
     let process = &processes[lpdi.item.iItem as usize];
 
