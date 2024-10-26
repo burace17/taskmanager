@@ -20,7 +20,7 @@ use windows::{
                 DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
                 KillTimer, LoadAcceleratorsW, PostQuitMessage, SendMessageW, SetTimer,
                 SetWindowLongPtrW, TranslateAcceleratorW, TranslateMessage, GWLP_USERDATA, MSG,
-                WM_COMMAND, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
+                WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -64,6 +64,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_TIMER => on_wm_timer(hwnd),
         WM_NOTIFY => on_wm_notify(hwnd, lparam),
         WM_SIZE => on_wm_size(hwnd),
+        WM_CONTEXTMENU => on_wm_contextmenu(hwnd, lparam),
         _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
 }
@@ -142,6 +143,7 @@ unsafe fn on_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LP
             DestroyWindow(hwnd.0).unwrap();
             LRESULT(0)
         }
+        resources::IDM_END_TASK => task_list::on_end_task_clicked(hwnd),
         _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
 }
@@ -162,5 +164,13 @@ fn on_wm_size(hwnd: WindowHandle) -> LRESULT {
     // safety: WM_CREATE will ensure the state has been stored in the window first
     let app_state = unsafe { state::get(hwnd) };
     task_list::resize_to_parent(app_state.borrow().task_list, hwnd);
+    LRESULT(0)
+}
+
+unsafe fn on_wm_contextmenu(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
+    let lparam = lparam.0 as i32;
+    let x = lparam & 0xFFFF;
+    let y = (lparam >> 16) & 0xFFFF;
+    task_list::on_show_contextmenu(hwnd, x, y);
     LRESULT(0)
 }

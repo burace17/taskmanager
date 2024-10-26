@@ -11,8 +11,8 @@ use windows::{
                 PROCESS_MEMORY_COUNTERS_EX2,
             },
             Threading::{
-                GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-                PROCESS_QUERY_LIMITED_INFORMATION,
+                GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+                PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
             },
         },
         UI::Shell::PathFindFileNameW,
@@ -145,4 +145,13 @@ pub fn get_cpu_usage(sample1: &Process, sample2: &Process, num_cpus: u32) -> u64
 
     let res = (((delta / time_elapsed_ms) / (num_cpus as f64)) * 100.0).round();
     res as u64
+}
+
+pub fn kill_process(pid: u32) -> Result<()> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid)?;
+        TerminateProcess(handle, 1)?;
+        CloseHandle(handle)?;
+        Ok(())
+    }
 }

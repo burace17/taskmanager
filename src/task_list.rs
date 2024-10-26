@@ -1,20 +1,27 @@
 use std::{cmp::min, ffi::c_void, mem::transmute};
 
-use crate::state;
+use crate::{
+    process,
+    resources::{to_pcwstr, IDM_TASK_CONTEXT_MENU},
+    state,
+};
 use widestring::U16CString;
 use windows::{
     core::{w, Result, PWSTR},
     Win32::{
-        Foundation::{HMODULE, LPARAM, RECT, TRUE, WPARAM},
+        Foundation::{HMODULE, LPARAM, LRESULT, RECT, TRUE, WPARAM},
+        System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::{
                 LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT, LVCFMT_RIGHT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT,
-                LVCF_WIDTH, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_INSERTCOLUMN,
-                LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT, LVS_OWNERDATA,
-                LVS_REPORT, NMLISTVIEW, NMLVDISPINFOW, WC_LISTVIEWW,
+                LVCF_WIDTH, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_GETNEXTITEM,
+                LVM_INSERTCOLUMN, LVM_SETEXTENDEDLISTVIEWSTYLE, LVNI_SELECTED, LVS_AUTOARRANGE,
+                LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, NMLISTVIEW, NMLVDISPINFOW,
+                WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, GetClientRect, MoveWindow, SendMessageW, HMENU, WS_BORDER,
+                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, LoadMenuW, MoveWindow,
+                SendMessageW, TrackPopupMenu, HMENU, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WS_BORDER,
                 WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
             },
         },
@@ -118,6 +125,52 @@ pub unsafe fn on_column_click(_hwnd: WindowHandle, lparam: LPARAM) {
     let lpdi = transmute::<LPARAM, *const NMLISTVIEW>(lparam);
     let lpdi = &(*lpdi);
     println!("column click: {}", lpdi.iSubItem);
+}
+
+fn get_selected_task(list_hwnd: WindowHandle) -> isize {
+    let result = unsafe {
+        SendMessageW(
+            list_hwnd.0,
+            LVM_GETNEXTITEM,
+            WPARAM(-1_isize as usize),
+            LPARAM(LVNI_SELECTED as isize),
+        )
+    };
+    result.0
+}
+
+pub fn on_show_contextmenu(hwnd: WindowHandle, x: i32, y: i32) {
+    unsafe {
+        let app_state = state::get(hwnd);
+        let selected_item = get_selected_task(app_state.borrow().task_list);
+        if selected_item == -1 {
+            return;
+        }
+
+        let instance = GetModuleHandleW(None).expect("shouldn't fail");
+        let menu_load =
+            LoadMenuW(instance, to_pcwstr(IDM_TASK_CONTEXT_MENU)).expect("shouldn't fail");
+        let menu = GetSubMenu(menu_load, 0);
+        // FIXME: should call GetSystemMetrics to find the correct context menu alignment
+        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, hwnd.0, None);
+        DestroyMenu(menu_load).expect("shouldn't fail");
+    }
+}
+
+pub fn on_end_task_clicked(hwnd: WindowHandle) -> LRESULT {
+    unsafe {
+        let app_state = state::get(hwnd);
+        let app_state = app_state.borrow();
+        let selected_item = get_selected_task(app_state.task_list);
+        if selected_item >= 0 {
+            let process = &app_state.processes[selected_item as usize];
+            if let Err(e) = process::kill_process(process.pid) {
+                println!("failed to kill process {}: {}", process.pid, e);
+            }
+        }
+
+        LRESULT(0)
+    }
 }
 
 fn add_column(task_list: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
