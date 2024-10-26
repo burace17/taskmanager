@@ -1,7 +1,4 @@
-use std::{
-    cell::RefCell, cmp::min, collections::HashMap, ffi::c_void, mem::transmute, ptr::addr_of_mut,
-    rc::Rc,
-};
+use std::{cell::RefCell, cmp::min, collections::HashMap, ffi::c_void, mem::transmute, rc::Rc};
 
 use process::Process;
 use widestring::U16CString;
@@ -145,7 +142,7 @@ unsafe fn create_listview(instance: &HMODULE, parent: &WindowHandle) -> Result<W
 fn resize_listview(listview: &WindowHandle, parent: &WindowHandle) {
     let mut rect = RECT::default();
     unsafe {
-        let _ = GetClientRect(parent.0, addr_of_mut!(rect));
+        let _ = GetClientRect(parent.0, &mut rect);
     };
     unsafe {
         let _ = MoveWindow(
@@ -180,7 +177,7 @@ fn listview_add_column(
             listview.0,
             LVM_INSERTCOLUMN,
             WPARAM(order as usize),
-            LPARAM(addr_of_mut!(column) as isize),
+            LPARAM(&raw mut column as isize),
         )
     };
 }
@@ -307,7 +304,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             init_listview(&list_hwnd);
 
             let mut system_info = SYSTEM_INFO::default();
-            GetSystemInfo(addr_of_mut!(system_info));
+            GetSystemInfo(&mut system_info);
 
             let app_state = Rc::new(RefCell::new(TaskManagerState {
                 listview: list_hwnd,
@@ -351,7 +348,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
-unsafe fn handle_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe fn handle_wm_command(
+    hwnd: WindowHandle,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     let id = (wparam.0 & 0xffff) as u16;
     match id {
         resources::IDM_NEW_TASK => {

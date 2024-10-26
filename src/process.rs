@@ -1,4 +1,4 @@
-use std::{mem::transmute, ptr::addr_of_mut, time::Instant};
+use std::{mem::transmute, time::Instant};
 
 use widestring::U16CString;
 use windows::{
@@ -36,7 +36,7 @@ unsafe fn get_process_image_name(process: HANDLE) -> Result<U16CString> {
         process,
         PROCESS_NAME_FORMAT(0),
         PWSTR(process_name.as_mut_ptr()),
-        addr_of_mut!(process_name_size),
+        &mut process_name_size,
     )?;
     let file_name = PathFindFileNameW(PCWSTR(process_name.as_ptr()));
     Ok(U16CString::from_ptr_str(file_name.as_ptr()))
@@ -46,9 +46,9 @@ unsafe fn get_process_working_set_size(process: HANDLE) -> Result<usize> {
     let mut process_memory_counters = PROCESS_MEMORY_COUNTERS_EX2::default();
     GetProcessMemoryInfo(
         process,
-        transmute::<*mut PROCESS_MEMORY_COUNTERS_EX2, *mut PROCESS_MEMORY_COUNTERS>(addr_of_mut!(
-            process_memory_counters
-        )),
+        transmute::<*mut PROCESS_MEMORY_COUNTERS_EX2, *mut PROCESS_MEMORY_COUNTERS>(
+            &mut process_memory_counters,
+        ),
         size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32,
     )?;
     Ok(process_memory_counters.PrivateWorkingSetSize)
@@ -66,10 +66,10 @@ unsafe fn get_process_cpu_time(process: HANDLE) -> Result<u64> {
 
     GetProcessTimes(
         process,
-        addr_of_mut!(creation_time),
-        addr_of_mut!(exit_time),
-        addr_of_mut!(kernel_time),
-        addr_of_mut!(user_time),
+        &mut creation_time,
+        &mut exit_time,
+        &mut kernel_time,
+        &mut user_time,
     )?;
 
     let kernel_time_64 = filetime_to_u64(&kernel_time);
@@ -108,7 +108,7 @@ pub fn get_processes() -> Result<Vec<Process>> {
     let mut cb_needed: u32 = 0;
 
     unsafe {
-        EnumProcesses(process_list.as_mut_ptr(), cb, addr_of_mut!(cb_needed))?;
+        EnumProcesses(process_list.as_mut_ptr(), cb, &mut cb_needed)?;
     }
 
     if cb == cb_needed {
