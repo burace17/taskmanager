@@ -24,8 +24,8 @@ pub struct Process {
     pub pid: u32,
     pub image_name: U16CString,
     pub private_working_set: usize,
-    pub cpu_time: u64,
-    pub sample_time: Instant,
+    cpu_time: u64,
+    sample_time: Instant,
     pub cpu_usage: u64,
 }
 
