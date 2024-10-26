@@ -4,10 +4,10 @@ use windows::{
         Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
         UI::WindowsAndMessaging::{
-                CreateWindowExW, LoadCursorW,
-                RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
-                WS_VISIBLE,
-            },
+            CreateWindowExW, LoadCursorW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW,
+            CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+            WS_VISIBLE,
+        },
     },
 };
 

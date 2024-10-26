@@ -51,7 +51,16 @@ unsafe fn get_process_working_set_size(process: HANDLE) -> Result<usize> {
         ),
         size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32,
     )?;
-    Ok(process_memory_counters.PrivateWorkingSetSize)
+
+    // Try to use PrivateWorkingSetSize first if the OS supports it, otherwise
+    // fallback on less accurate but more widely supported values.
+    if process_memory_counters.PrivateWorkingSetSize != 0 {
+        Ok(process_memory_counters.PrivateWorkingSetSize)
+    } else if process_memory_counters.PrivateUsage != 0 {
+        Ok(process_memory_counters.PrivateUsage)
+    } else {
+        Ok(process_memory_counters.WorkingSetSize)
+    }
 }
 
 fn filetime_to_u64(time: &FILETIME) -> u64 {
@@ -119,7 +128,9 @@ pub fn get_processes() -> Result<Vec<Process>> {
         if let Ok(process) = unsafe { query_process_information(pid, process_handle) } {
             output_process_list.push(process);
         }
-        unsafe { CloseHandle(process_handle)? };
+        unsafe {
+            let _ = CloseHandle(process_handle);
+        };
     }
     Ok(output_process_list)
 }
