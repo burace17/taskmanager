@@ -1,6 +1,6 @@
 use std::{cell::RefCell, mem::transmute, rc::Rc};
 
-use resources::ID_UPDATE_TIMER;
+use resources::{FALSE, IDD_ABOUTBOX, ID_UPDATE_TIMER, TRUE};
 use state::TaskManagerState;
 use window::WindowHandle;
 use windows::{
@@ -14,10 +14,11 @@ use windows::{
         UI::{
             Controls::{LVN_COLUMNCLICK, LVN_GETDISPINFO, NMHDR},
             WindowsAndMessaging::{
-                DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
-                KillTimer, LoadAcceleratorsW, PostQuitMessage, SetTimer, SetWindowLongPtrW,
-                TranslateAcceleratorW, TranslateMessage, GWLP_USERDATA, MSG, WM_COMMAND,
-                WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
+                DefWindowProcW, DestroyWindow, DialogBoxParamW, DispatchMessageW, EndDialog,
+                GetMessageW, GetWindowLongPtrW, KillTimer, LoadAcceleratorsW, PostQuitMessage,
+                SetTimer, SetWindowLongPtrW, TranslateAcceleratorW, TranslateMessage,
+                GWLP_USERDATA, MSG, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY,
+                WM_INITDIALOG, WM_NOTIFY, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -66,6 +67,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+const IDOK: usize = windows::Win32::UI::WindowsAndMessaging::IDOK.0 as usize;
+const IDCANCEL: usize = windows::Win32::UI::WindowsAndMessaging::IDCANCEL.0 as usize;
+unsafe extern "system" fn aboutdlgproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    _lparam: LPARAM,
+) -> isize {
+    match msg {
+        WM_COMMAND if wparam.0 == IDOK || wparam.0 == IDCANCEL => {
+            let _ = EndDialog(hwnd, IDOK as isize);
+            TRUE
+        }
+        WM_INITDIALOG | WM_COMMAND => TRUE,
+        _ => FALSE,
+    }
+}
+
 fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
     unsafe {
         let instance = GetModuleHandleW(None).expect("shouldn't fail");
@@ -88,7 +107,7 @@ fn on_wm_destroy(hwnd: WindowHandle) -> LRESULT {
         let app_state = Rc::from_raw(
             GetWindowLongPtrW(hwnd.0, GWLP_USERDATA) as *const RefCell<TaskManagerState>
         );
-        println!("app ref count = {} ", Rc::strong_count(&app_state));
+        debug_assert_eq!(Rc::strong_count(&app_state), 1);
         SetWindowLongPtrW(hwnd.0, GWLP_USERDATA, 0);
         drop(app_state);
         PostQuitMessage(0);
@@ -114,6 +133,17 @@ unsafe fn on_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LP
             DestroyWindow(hwnd.0).unwrap();
             LRESULT(0)
         }
+        resources::IDM_ABOUT => {
+            let instance = GetModuleHandleW(None).expect("shouldn't fail");
+            let _ = DialogBoxParamW(
+                instance,
+                to_pcwstr(IDD_ABOUTBOX),
+                hwnd.0,
+                Some(aboutdlgproc),
+                LPARAM(0),
+            );
+            LRESULT(0)
+        }
         resources::IDM_END_TASK => task_list::on_end_task_clicked(hwnd),
         _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
     }
@@ -121,7 +151,6 @@ unsafe fn on_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LP
 
 unsafe fn on_wm_notify(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
     let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
-    //let listview_handle = GetDlgItem(hwnd.0, ID_LISTVIEW);
     let code = (*lpnmh).code;
     match code {
         LVN_GETDISPINFO => task_list::on_get_display_info(hwnd, lparam),

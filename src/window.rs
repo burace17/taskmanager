@@ -48,7 +48,7 @@ pub unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE::default(),
         *name,
-        w!("taskmgr--"),
+        w!("taskmanager--"),
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
