@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use std::{cell::RefCell, mem::transmute, rc::Rc};
 
 use resources::{FALSE, IDD_ABOUTBOX, ID_UPDATE_TIMER, TRUE};
