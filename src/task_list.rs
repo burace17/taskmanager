@@ -299,57 +299,55 @@ const HEADER_SORT_UP_FORMAT: i32 = HDF_SORTUP.0 | HDF_STRING.0;
 const HEADER_SORT_DOWN_FORMAT: i32 = HDF_SORTDOWN.0 | HDF_STRING.0;
 const HEADER_NO_SORT_FORMAT: i32 = HDF_STRING.0;
 
-fn toggle_sort_order(hwnd: WindowHandle, sort_column_index: i32) {
-    unsafe {
-        let binding = state::get(hwnd);
-        let mut app_state = binding.borrow_mut();
-        let header = SendMessageW(app_state.task_list.0, LVM_GETHEADER, WPARAM(0), LPARAM(0));
-        if header.0 == INVALID_HANDLE_VALUE.0 as isize {
-            println!("LVM_GETHEADER failed");
-            return;
+unsafe fn toggle_sort_order(hwnd: WindowHandle, sort_column_index: i32) {
+    let binding = state::get(hwnd);
+    let mut app_state = binding.borrow_mut();
+    let header = SendMessageW(app_state.task_list.0, LVM_GETHEADER, WPARAM(0), LPARAM(0));
+    if header.0 == INVALID_HANDLE_VALUE.0 as isize {
+        println!("LVM_GETHEADER failed");
+        return;
+    }
+
+    let header = WindowHandle::new(HWND(header.0 as _));
+
+    for column_index in 0..NUM_TASK_LIST_COLUMNS {
+        let mut column = HDITEMW {
+            mask: HDI_FORMAT,
+            ..Default::default()
+        };
+        let result = SendMessageW(
+            header.0,
+            HDM_GETITEM,
+            WPARAM(column_index),
+            LPARAM(&raw mut column as isize),
+        );
+        if result.0 == 0 {
+            println!("HDM_GETITEM failed for column: {}", column_index);
+            continue;
         }
 
-        let header = WindowHandle::new(HWND(header.0 as _));
-
-        for column_index in 0..NUM_TASK_LIST_COLUMNS {
-            let mut column = HDITEMW {
-                mask: HDI_FORMAT,
-                ..Default::default()
-            };
-            let result = SendMessageW(
-                header.0,
-                HDM_GETITEM,
-                WPARAM(column_index),
-                LPARAM(&raw mut column as isize),
-            );
-            if result.0 == 0 {
-                println!("HDM_GETITEM failed for column: {}", column_index);
-                continue;
-            }
-
-            if column_index == sort_column_index as usize {
-                if column.fmt.0 & HDF_SORTUP.0 != 0 {
-                    column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_DOWN_FORMAT);
-                    app_state.sort_state =
-                        SortState::SortDown(column_index_to_sort_key(sort_column_index));
-                } else {
-                    column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_UP_FORMAT);
-                    app_state.sort_state =
-                        SortState::SortUp(column_index_to_sort_key(sort_column_index));
-                }
+        if column_index == sort_column_index as usize {
+            if column.fmt.0 & HDF_SORTUP.0 != 0 {
+                column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_DOWN_FORMAT);
+                app_state.sort_state =
+                    SortState::SortDown(column_index_to_sort_key(sort_column_index));
             } else {
-                column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_NO_SORT_FORMAT);
+                column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_UP_FORMAT);
+                app_state.sort_state =
+                    SortState::SortUp(column_index_to_sort_key(sort_column_index));
             }
+        } else {
+            column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_NO_SORT_FORMAT);
+        }
 
-            let result = SendMessageW(
-                header.0,
-                HDM_SETITEM,
-                WPARAM(column_index),
-                LPARAM(&raw mut column as isize),
-            );
-            if result.0 == 0 {
-                println!("HDM_SETITEM failed for column: {}", column_index);
-            }
+        let result = SendMessageW(
+            header.0,
+            HDM_SETITEM,
+            WPARAM(column_index),
+            LPARAM(&raw mut column as isize),
+        );
+        if result.0 == 0 {
+            println!("HDM_SETITEM failed for column: {}", column_index);
         }
     }
 }
