@@ -6,9 +6,25 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::{process::Process, WindowHandle};
 
+#[derive(Clone, Copy)]
+pub enum SortState {
+    None,
+    SortUp(SortKey),
+    SortDown(SortKey),
+}
+
+#[derive(Clone, Copy)]
+pub enum SortKey {
+    Name,
+    Pid,
+    Cpu,
+    Memory,
+}
+
 pub struct TaskManagerState {
     pub task_list: WindowHandle,
     pub processes: Vec<Process>,
+    pub sort_state: SortState,
     pub pid_map: HashMap<u32, Process>,
     pub num_cpus: u32,
 }
@@ -27,6 +43,7 @@ pub unsafe fn initialize(hwnd: WindowHandle, task_list_hwnd: WindowHandle, num_c
     let app_state = Rc::new(RefCell::new(TaskManagerState {
         task_list: task_list_hwnd,
         processes: Vec::new(),
+        sort_state: SortState::None,
         pid_map: HashMap::new(),
         num_cpus,
     }));

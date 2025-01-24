@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, mem::transmute, rc::Rc};
+use std::{cell::RefCell, mem::transmute, rc::Rc};
 
 use resources::ID_UPDATE_TIMER;
 use state::TaskManagerState;
@@ -12,15 +12,12 @@ use windows::{
             SystemInformation::{GetSystemInfo, SYSTEM_INFO},
         },
         UI::{
-            Controls::{
-                LVM_SETITEMCOUNT, LVN_COLUMNCLICK, LVN_GETDISPINFO, LVSICF_NOINVALIDATEALL,
-                LVSICF_NOSCROLL, NMHDR,
-            },
+            Controls::{LVN_COLUMNCLICK, LVN_GETDISPINFO, NMHDR},
             WindowsAndMessaging::{
                 DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
-                KillTimer, LoadAcceleratorsW, PostQuitMessage, SendMessageW, SetTimer,
-                SetWindowLongPtrW, TranslateAcceleratorW, TranslateMessage, GWLP_USERDATA, MSG,
-                WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
+                KillTimer, LoadAcceleratorsW, PostQuitMessage, SetTimer, SetWindowLongPtrW,
+                TranslateAcceleratorW, TranslateMessage, GWLP_USERDATA, MSG, WM_COMMAND,
+                WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_NOTIFY, WM_SIZE, WM_TIMER,
             },
         },
     },
@@ -69,32 +66,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
-fn refresh_process_list(main_window: WindowHandle) {
-    let app_state = unsafe { state::get(main_window) };
-    let mut app_state = app_state.borrow_mut();
-    let mut new_processes = process::get_processes().unwrap();
-    let mut new_pid_map = HashMap::new();
-    for process in new_processes.iter_mut() {
-        new_pid_map.insert(process.pid, process.clone());
-        if let Some(old_process) = app_state.pid_map.get(&process.pid) {
-            process.cpu_usage = process::get_cpu_usage(old_process, process, app_state.num_cpus);
-        }
-    }
-
-    app_state.processes = new_processes;
-    app_state.pid_map = new_pid_map;
-
-    let listview_behavior = LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL;
-    unsafe {
-        SendMessageW(
-            app_state.task_list.0,
-            LVM_SETITEMCOUNT,
-            WPARAM(app_state.processes.len()),
-            LPARAM(listview_behavior as isize),
-        )
-    };
-}
-
 fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
     unsafe {
         let instance = GetModuleHandleW(None).expect("shouldn't fail");
@@ -105,7 +76,7 @@ fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
 
         state::initialize(hwnd, task_list_hwnd, system_info.dwNumberOfProcessors);
 
-        refresh_process_list(hwnd);
+        task_list::refresh_process_list(hwnd, false);
         SetTimer(hwnd.0, ID_UPDATE_TIMER as usize, 500, None);
     }
     LRESULT(0)
@@ -126,7 +97,7 @@ fn on_wm_destroy(hwnd: WindowHandle) -> LRESULT {
 }
 
 fn on_wm_timer(hwnd: WindowHandle) -> LRESULT {
-    refresh_process_list(hwnd);
+    task_list::refresh_process_list(hwnd, false);
     LRESULT(0)
 }
 
