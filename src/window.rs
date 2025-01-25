@@ -3,10 +3,13 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
-        UI::WindowsAndMessaging::{
-            CreateWindowExW, LoadCursorW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW,
-            CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
-            WS_VISIBLE,
+        UI::{
+            Controls::{InitCommonControlsEx, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX},
+            WindowsAndMessaging::{
+                CreateWindowExW, LoadCursorW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW,
+                CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSEXW,
+                WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            },
         },
     },
 };
@@ -62,4 +65,12 @@ pub unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
     let _ = ShowWindow(hwnd, SW_SHOW);
     let _ = UpdateWindow(hwnd);
     Ok(())
+}
+
+pub fn init_common_controls() {
+    let common_controls = INITCOMMONCONTROLSEX {
+        dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
+        dwICC: ICC_STANDARD_CLASSES,
+    };
+    let _ = unsafe { InitCommonControlsEx(&common_controls) };
 }

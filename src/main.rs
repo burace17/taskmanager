@@ -40,6 +40,7 @@ fn main() -> Result<()> {
         let instance = GetModuleHandleW(None)?;
 
         let window_class = w!("window");
+        window::init_common_controls();
         window::register_class(&instance, &window_class, wndproc)?;
         window::create_window(&instance, &window_class)?;
 
