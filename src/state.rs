@@ -8,7 +8,6 @@ use crate::{process::Process, WindowHandle};
 
 #[derive(Clone, Copy)]
 pub enum SortState {
-    None,
     SortUp(SortKey),
     SortDown(SortKey),
 }
@@ -43,7 +42,7 @@ pub unsafe fn initialize(hwnd: WindowHandle, task_list_hwnd: WindowHandle, num_c
     let app_state = Rc::new(RefCell::new(TaskManagerState {
         task_list: task_list_hwnd,
         processes: Vec::new(),
-        sort_state: SortState::None,
+        sort_state: SortState::SortUp(SortKey::Name),
         pid_map: HashMap::new(),
         num_cpus,
     }));

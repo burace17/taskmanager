@@ -63,7 +63,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_COMMAND => on_wm_command(hwnd, msg, wparam, lparam),
         WM_DESTROY => on_wm_destroy(hwnd),
         WM_TIMER => on_wm_timer(hwnd),
-        WM_NOTIFY => on_wm_notify(hwnd, lparam),
+        WM_NOTIFY => on_wm_notify(hwnd, wparam, lparam),
         WM_SIZE => on_wm_size(hwnd),
         WM_CONTEXTMENU => on_wm_contextmenu(hwnd, lparam),
         _ => DefWindowProcW(hwnd.0, msg, wparam, lparam),
@@ -119,7 +119,7 @@ fn on_wm_destroy(hwnd: WindowHandle) -> LRESULT {
 }
 
 fn on_wm_timer(hwnd: WindowHandle) -> LRESULT {
-    task_list::refresh_process_list(hwnd, false);
+    task_list::refresh_process_list(hwnd, true);
     LRESULT(0)
 }
 
@@ -152,13 +152,15 @@ unsafe fn on_wm_command(hwnd: WindowHandle, msg: u32, wparam: WPARAM, lparam: LP
     }
 }
 
-unsafe fn on_wm_notify(hwnd: WindowHandle, lparam: LPARAM) -> LRESULT {
+unsafe fn on_wm_notify(hwnd: WindowHandle, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let lpnmh = transmute::<LPARAM, *const NMHDR>(lparam);
     let code = (*lpnmh).code;
     match code {
         LVN_GETDISPINFO => task_list::on_get_display_info(hwnd, lparam),
         LVN_COLUMNCLICK => task_list::on_column_click(hwnd, lparam),
-        _ => {}
+        _ => {
+            return DefWindowProcW(hwnd.0, WM_NOTIFY, wparam, lparam);
+        }
     }
     LRESULT(0)
 }

@@ -27,8 +27,9 @@ use windows::{
                 LVCFMT_RIGHT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW,
                 LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMN,
                 LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVNI_SELECTED,
-                LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, LVS_AUTOARRANGE, LVS_EX_FULLROWSELECT,
-                LVS_OWNERDATA, LVS_REPORT, NMLISTVIEW, NMLVDISPINFOW, WC_LISTVIEWW,
+                LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, LVS_AUTOARRANGE, LVS_EX_DOUBLEBUFFER,
+                LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, NMLISTVIEW, NMLVDISPINFOW,
+                WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, LoadMenuW, MoveWindow,
@@ -76,11 +77,12 @@ pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result
         None,
     )?;
 
+    let extended_lv_style = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER;
     SendMessageW(
         hwnd,
         LVM_SETEXTENDEDLISTVIEWSTYLE,
-        WPARAM(LVS_EX_FULLROWSELECT as usize),
-        LPARAM(LVS_EX_FULLROWSELECT as isize),
+        WPARAM(extended_lv_style as usize),
+        LPARAM(extended_lv_style as isize),
     );
 
     let handle = WindowHandle::new(hwnd);
@@ -137,7 +139,6 @@ pub fn refresh_process_list(main_window: WindowHandle, invalidate_all: bool) {
     }
 
     match app_state.sort_state {
-        SortState::None => {}
         SortState::SortUp(sort_key) => sort_process_list(&mut new_processes, sort_key),
         SortState::SortDown(sort_key) => {
             sort_process_list(&mut new_processes, sort_key);
@@ -148,17 +149,19 @@ pub fn refresh_process_list(main_window: WindowHandle, invalidate_all: bool) {
     app_state.processes = new_processes;
     app_state.pid_map = new_pid_map;
 
-    let mut listview_behavior = LVSICF_NOSCROLL;
-    if !invalidate_all {
-        listview_behavior |= LVSICF_NOINVALIDATEALL;
-    }
+    let flags = if invalidate_all {
+        LVSICF_NOSCROLL
+    } else {
+        LVSICF_NOSCROLL | LVSICF_NOINVALIDATEALL
+    };
+
     unsafe {
         SendMessageW(
             app_state.task_list.0,
             LVM_SETITEMCOUNT,
             WPARAM(app_state.processes.len()),
-            LPARAM(listview_behavior as isize),
-        )
+            LPARAM(flags as isize),
+        );
     };
 }
 

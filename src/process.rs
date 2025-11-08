@@ -19,7 +19,7 @@ use windows::{
     },
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Process {
     pub pid: u32,
     pub image_name: U16CString,
