@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 widestring = "1.1.0"
 human_bytes = "0.4"
+im = "15.1.0"
 
 [dependencies.windows]
 version = "0.58"

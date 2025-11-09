@@ -12,8 +12,6 @@ use windows::{
     },
 };
 
-use crate::WindowHandle;
-
 type RunDlgFunc = unsafe extern "system" fn(
     hwndowner: HWND,
     icon: HICON,
@@ -23,7 +21,7 @@ type RunDlgFunc = unsafe extern "system" fn(
     dwflags: i32,
 );
 
-pub fn show(owner: &WindowHandle) -> Result<()> {
+pub fn show(owner: HWND) -> Result<()> {
     unsafe {
         let shell32 = LoadLibraryW(w!("shell32.dll"))?;
         let run_dlg_proc = GetProcAddress(shell32, PCSTR(61 as *const u8));
@@ -32,7 +30,7 @@ pub fn show(owner: &WindowHandle) -> Result<()> {
             let run_dlg_proc =
                 transmute::<unsafe extern "system" fn() -> isize, RunDlgFunc>(run_dlg_proc);
             run_dlg_proc(
-                owner.0,
+                owner,
                 HICON(null_mut()),
                 PCWSTR(null()),
                 w!("Create new task"),

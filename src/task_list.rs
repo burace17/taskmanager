@@ -1,8 +1,7 @@
 use std::{
-    cmp::{min, Ordering},
-    collections::HashMap,
+    cmp::{Ordering, min},
     ffi::c_void,
-    mem::transmute,
+    mem::transmute, rc::Rc,
 };
 
 use crate::{
@@ -13,35 +12,22 @@ use crate::{
 use human_bytes::human_bytes;
 use widestring::U16CString;
 use windows::{
-    core::{w, Result, PWSTR},
     Win32::{
         Foundation::{HMODULE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, RECT, TRUE, WPARAM},
         Globalization::{
-            CompareStringEx, COMPARE_STRING_FLAGS, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN,
-            LOCALE_NAME_SYSTEM_DEFAULT,
+            COMPARE_STRING_FLAGS, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringEx, LOCALE_NAME_SYSTEM_DEFAULT
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Controls::{
-                HDF_SORTDOWN, HDF_SORTUP, HDF_STRING, HDITEMW, HDI_FORMAT, HDM_GETITEM,
-                HDM_SETITEM, HEADER_CONTROL_FORMAT_FLAGS, LIST_VIEW_ITEM_FLAGS, LVCFMT_LEFT,
-                LVCFMT_RIGHT, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW,
-                LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMN,
-                LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVNI_SELECTED,
-                LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, LVS_AUTOARRANGE, LVS_EX_DOUBLEBUFFER,
-                LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, NMLISTVIEW, NMLVDISPINFOW,
-                WC_LISTVIEWW,
+                HDF_SORTDOWN, HDF_SORTUP, HDF_STRING, HDI_FORMAT, HDITEMW, HDM_GETITEM, HDM_SETITEM, HEADER_CONTROL_FORMAT_FLAGS, LIST_VIEW_ITEM_FLAGS, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCFMT_LEFT, LVCFMT_RIGHT, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMN, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVNI_SELECTED, LVS_AUTOARRANGE, LVS_EX_DOUBLEBUFFER, LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, NMLISTVIEW, NMLVDISPINFOW, WC_LISTVIEWW
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, GetWindowRect, LoadMenuW,
-                MoveWindow, SendMessageW, TrackPopupMenu, HMENU, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
-                WM_SIZE, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
+                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, GetWindowRect, HMENU, LoadMenuW, MoveWindow, SendMessageW, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, WM_SIZE, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE
             },
         },
-    },
+    }, core::{PWSTR, Result, w}
 };
-
-use crate::window::WindowHandle;
 
 const INDEX_NAME: i32 = 0;
 const INDEX_PID: i32 = 1;
@@ -59,7 +45,7 @@ fn column_index_to_sort_key(sort_column_index: i32) -> SortKey {
     }
 }
 
-pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<WindowHandle> {
+pub unsafe fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
     let style = WS_TABSTOP | WS_CHILD | WS_BORDER | WS_VISIBLE;
     let lv_style = LVS_AUTOARRANGE | LVS_REPORT | LVS_OWNERDATA;
     let window_style = style | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(lv_style);
@@ -72,7 +58,7 @@ pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result
         0,
         0,
         0,
-        parent.0,
+        parent,
         HMENU(crate::resources::ID_TASK_LIST as *mut c_void),
         *instance,
         None,
@@ -86,14 +72,12 @@ pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result
         LPARAM(extended_lv_style as isize),
     );
 
-    let handle = WindowHandle::new(hwnd);
+    add_column(hwnd, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
+    add_column(hwnd, "PID", INDEX_PID, 50, LVCFMT_LEFT);
+    add_column(hwnd, "CPU", INDEX_CPU, 50, LVCFMT_RIGHT);
+    add_column(hwnd, "Memory", INDEX_MEMORY, 90, LVCFMT_RIGHT);
 
-    add_column(handle, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
-    add_column(handle, "PID", INDEX_PID, 50, LVCFMT_LEFT);
-    add_column(handle, "CPU", INDEX_CPU, 50, LVCFMT_RIGHT);
-    add_column(handle, "Memory", INDEX_MEMORY, 90, LVCFMT_RIGHT);
-
-    Ok(handle)
+    Ok(hwnd)
 }
 
 fn lexical_str_cmp(a: &U16CString, b: &U16CString) -> Ordering {
@@ -116,7 +100,7 @@ fn lexical_str_cmp(a: &U16CString, b: &U16CString) -> Ordering {
     }
 }
 
-fn sort_process_list(processes: &mut [Process], sort_key: SortKey) {
+fn sort_process_list(processes: &mut [std::rc::Rc<Process>], sort_key: SortKey) {
     match sort_key {
         SortKey::Name => processes.sort_by(|a, b| lexical_str_cmp(&a.image_name, &b.image_name)),
         SortKey::Pid => processes.sort_by_key(|k| k.pid),
@@ -126,62 +110,60 @@ fn sort_process_list(processes: &mut [Process], sort_key: SortKey) {
 }
 
 // invalidate_all = true does full refresh of list rather than just the items in view
-pub fn refresh_process_list(main_window: WindowHandle, invalidate_all: bool) {
-    let app_state = unsafe { state::get(main_window) };
-    let mut app_state = app_state.borrow_mut();
-    let mut new_processes = process::get_processes().unwrap();
-    let mut new_pid_map = HashMap::new();
-    for process in new_processes.iter_mut() {
-        new_pid_map.insert(process.pid, process.clone());
-        if let Some(old_process) = app_state.pid_map.get(&process.pid) {
-            process.cpu_usage = process::get_cpu_usage(old_process, process, app_state.num_cpus);
-        }
-    }
+pub fn refresh_process_list(main_window: HWND, invalidate_all: bool) {
+    let state = unsafe { state::get(main_window) };
 
-    match app_state.sort_state {
-        SortState::SortUp(sort_key) => sort_process_list(&mut new_processes, sort_key),
+    let mut new_pid_map = state.pid_map.clone();
+    process::get_processes(&state, &mut new_pid_map).unwrap();
+    
+    let mut new_process_list: Vec<Rc<Process>> = new_pid_map.iter().map(|(_, process)| process.clone()).collect();
+    let num_processes = new_process_list.len();
+    
+    match state.sort_state {
+        SortState::SortUp(sort_key) => sort_process_list(&mut new_process_list, sort_key),
         SortState::SortDown(sort_key) => {
-            sort_process_list(&mut new_processes, sort_key);
-            new_processes.reverse();
+            sort_process_list(&mut new_process_list, sort_key);
+            new_process_list.reverse();
         }
     }
-
-    app_state.processes = new_processes;
-    app_state.pid_map = new_pid_map;
-
+    
+    unsafe {
+        state::update_processes(main_window, new_process_list, new_pid_map);
+    }
+    
     let flags = if invalidate_all {
         LVSICF_NOSCROLL
     } else {
         LVSICF_NOSCROLL | LVSICF_NOINVALIDATEALL
     };
-
+    
     unsafe {
         SendMessageW(
-            app_state.task_list.0,
+            state.task_list,
             LVM_SETITEMCOUNT,
-            WPARAM(app_state.processes.len()),
+            WPARAM(num_processes),
             LPARAM(flags as isize),
         );
     };
 }
 
-pub fn resize_to_parent(listview: WindowHandle, parent: WindowHandle, status_bar: WindowHandle) {
+pub fn resize_to_parent(listview: HWND, parent: HWND, status_bar: HWND) {
     unsafe {
         // Let status bar size itself first
-        SendMessageW(status_bar.0, WM_SIZE, WPARAM(0), LPARAM(0));
+        SendMessageW(status_bar, WM_SIZE, WPARAM(0), LPARAM(0));
 
         // Get client area of parent window
         let mut client_rect = RECT::default();
-        let _ = GetClientRect(parent.0, &mut client_rect);
+        let _ = GetClientRect(parent, &mut client_rect);
 
         // Get status bar rect to determine its height
         let mut status_rect = RECT::default();
-        let _ = GetWindowRect(status_bar.0, &mut status_rect);
+        let _ = GetWindowRect(status_bar, &mut status_rect);
         let status_height = status_rect.bottom - status_rect.top;
 
         // Size listview to fill client area minus status bar height
         let _ = MoveWindow(
-            listview.0,
+            listview,
             0,
             0,
             client_rect.right,
@@ -191,16 +173,15 @@ pub fn resize_to_parent(listview: WindowHandle, parent: WindowHandle, status_bar
     };
 }
 
-pub unsafe fn on_get_display_info(hwnd: WindowHandle, lparam: LPARAM) {
+pub unsafe fn on_get_display_info(hwnd: HWND, lparam: LPARAM) {
     let lpdi = transmute::<LPARAM, *const NMLVDISPINFOW>(lparam);
     let lpdi = &(*lpdi);
     if (lpdi.item.mask & LVIF_TEXT) == LIST_VIEW_ITEM_FLAGS(0) {
         return;
     }
 
-    let app_state = state::get(hwnd);
-    let processes = &app_state.borrow().processes;
-    let process = &processes[lpdi.item.iItem as usize];
+    let state = state::get(hwnd);
+    let process = &state.processes[lpdi.item.iItem as usize];
 
     match lpdi.item.iSubItem {
         INDEX_NAME => {
@@ -222,17 +203,17 @@ pub unsafe fn on_get_display_info(hwnd: WindowHandle, lparam: LPARAM) {
     }
 }
 
-pub unsafe fn on_column_click(hwnd: WindowHandle, lparam: LPARAM) {
+pub unsafe fn on_column_click(hwnd: HWND, lparam: LPARAM) {
     let lpdi = transmute::<LPARAM, *const NMLISTVIEW>(lparam);
     let lpdi = &(*lpdi);
     toggle_sort_order(hwnd, lpdi.iSubItem);
     refresh_process_list(hwnd, true);
 }
 
-pub fn on_show_contextmenu(hwnd: WindowHandle, x: i32, y: i32) {
+pub fn on_show_contextmenu(hwnd: HWND, x: i32, y: i32) {
     unsafe {
-        let app_state = state::get(hwnd);
-        let selected_item = get_selected_task(app_state.borrow().task_list);
+        let state = state::get(hwnd);
+        let selected_item = get_selected_task(state.task_list);
         if selected_item == -1 {
             return;
         }
@@ -242,18 +223,17 @@ pub fn on_show_contextmenu(hwnd: WindowHandle, x: i32, y: i32) {
             LoadMenuW(instance, to_pcwstr(IDM_TASK_CONTEXT_MENU)).expect("shouldn't fail");
         let menu = GetSubMenu(menu_load, 0);
         // FIXME: should call GetSystemMetrics to find the correct context menu alignment
-        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, hwnd.0, None);
+        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, hwnd, None);
         DestroyMenu(menu_load).expect("shouldn't fail");
     }
 }
 
-pub fn on_end_task_clicked(hwnd: WindowHandle) -> LRESULT {
+pub fn on_end_task_clicked(hwnd: HWND) -> LRESULT {
     unsafe {
-        let app_state = state::get(hwnd);
-        let app_state = app_state.borrow();
-        let selected_item = get_selected_task(app_state.task_list);
+        let state = state::get(hwnd);
+        let selected_item = get_selected_task(state.task_list);
         if selected_item >= 0 {
-            let process = &app_state.processes[selected_item as usize];
+            let process = &state.processes[selected_item as usize];
             if let Err(e) = process::kill_process(process.pid) {
                 println!("failed to kill process {}: {}", process.pid, e);
             }
@@ -263,7 +243,7 @@ pub fn on_end_task_clicked(hwnd: WindowHandle) -> LRESULT {
     }
 }
 
-fn add_column(task_list: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
+fn add_column(task_list: HWND, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
     let mut title = widestring::U16CString::from_str(title).unwrap();
     let header = PWSTR::from_raw(title.as_mut_ptr());
     let mut column = LVCOLUMNW {
@@ -275,7 +255,7 @@ fn add_column(task_list: WindowHandle, title: &str, order: i32, width: i32, fmt:
     };
     unsafe {
         SendMessageW(
-            task_list.0,
+            task_list,
             LVM_INSERTCOLUMN,
             WPARAM(order as usize),
             LPARAM(&raw mut column as isize),
@@ -294,10 +274,10 @@ unsafe fn copy_wstring_to_buffer(wstr: &U16CString, buffer: PWSTR, buffer_size: 
     std::ptr::copy_nonoverlapping(wstr.as_ptr(), buffer.as_ptr(), len);
 }
 
-fn get_selected_task(list_hwnd: WindowHandle) -> isize {
+fn get_selected_task(list_hwnd: HWND) -> isize {
     let result = unsafe {
         SendMessageW(
-            list_hwnd.0,
+            list_hwnd,
             LVM_GETNEXTITEM,
             WPARAM(-1_isize as usize),
             LPARAM(LVNI_SELECTED as isize),
@@ -310,16 +290,27 @@ const HEADER_SORT_UP_FORMAT: i32 = HDF_SORTUP.0 | HDF_STRING.0;
 const HEADER_SORT_DOWN_FORMAT: i32 = HDF_SORTDOWN.0 | HDF_STRING.0;
 const HEADER_NO_SORT_FORMAT: i32 = HDF_STRING.0;
 
-unsafe fn toggle_sort_order(hwnd: WindowHandle, sort_column_index: i32) {
-    let binding = state::get(hwnd);
-    let mut app_state = binding.borrow_mut();
-    let header = SendMessageW(app_state.task_list.0, LVM_GETHEADER, WPARAM(0), LPARAM(0));
+unsafe fn toggle_sort_order(hwnd: HWND, sort_column_index: i32) {
+    let state = state::get(hwnd);
+    
+    let new_sort = match state.sort_state {
+        SortState::SortUp(_) => {
+            SortState::SortDown(column_index_to_sort_key(sort_column_index))
+        }
+        SortState::SortDown(_) => {
+            SortState::SortUp(column_index_to_sort_key(sort_column_index))
+        }
+    };
+    
+    state::set_sort_state(hwnd, new_sort);
+    
+    let header = SendMessageW(state.task_list, LVM_GETHEADER, WPARAM(0), LPARAM(0));
     if header.0 == INVALID_HANDLE_VALUE.0 as isize {
         println!("LVM_GETHEADER failed");
         return;
     }
 
-    let header = WindowHandle::new(HWND(header.0 as _));
+    let header = HWND(header.0 as _);
 
     for column_index in 0..NUM_TASK_LIST_COLUMNS {
         let mut column = HDITEMW {
@@ -327,7 +318,7 @@ unsafe fn toggle_sort_order(hwnd: WindowHandle, sort_column_index: i32) {
             ..Default::default()
         };
         let result = SendMessageW(
-            header.0,
+            header,
             HDM_GETITEM,
             WPARAM(column_index),
             LPARAM(&raw mut column as isize),
@@ -338,21 +329,16 @@ unsafe fn toggle_sort_order(hwnd: WindowHandle, sort_column_index: i32) {
         }
 
         if column_index == sort_column_index as usize {
-            if column.fmt.0 & HDF_SORTUP.0 != 0 {
-                column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_DOWN_FORMAT);
-                app_state.sort_state =
-                    SortState::SortDown(column_index_to_sort_key(sort_column_index));
-            } else {
-                column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_UP_FORMAT);
-                app_state.sort_state =
-                    SortState::SortUp(column_index_to_sort_key(sort_column_index));
-            }
+            column.fmt = match new_sort {
+                SortState::SortDown(_) => HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_DOWN_FORMAT),
+                SortState::SortUp(_) => HEADER_CONTROL_FORMAT_FLAGS(HEADER_SORT_UP_FORMAT),
+            };
         } else {
             column.fmt = HEADER_CONTROL_FORMAT_FLAGS(HEADER_NO_SORT_FORMAT);
         }
 
         let result = SendMessageW(
-            header.0,
+            header,
             HDM_SETITEM,
             WPARAM(column_index),
             LPARAM(&raw mut column as isize),

@@ -1,32 +1,17 @@
 use windows::{
-    core::{w, Result, PCWSTR},
     Win32::{
         Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
         UI::{
-            Controls::{InitCommonControlsEx, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX},
+            Controls::{ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx},
             WindowsAndMessaging::{
-                CreateWindowExW, LoadCursorW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW,
-                CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSEXW,
-                WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, IDC_ARROW, LoadCursorW, RegisterClassExW, SW_SHOW, ShowWindow, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_VISIBLE
             },
         },
-    },
+    }, core::{PCWSTR, Result, w}
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
-
-// Container for a valid window handle
-// Initialize with new()
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowHandle(pub HWND);
-
-impl WindowHandle {
-    pub unsafe fn new(hwnd: HWND) -> Self {
-        Self(hwnd)
-    }
-}
 
 type WndProc = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
 

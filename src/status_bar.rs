@@ -1,26 +1,24 @@
-use crate::window::WindowHandle;
 use human_bytes::human_bytes;
 use std::ffi::c_void;
 use windows::{
-    core::{w, Result},
     Win32::{
-        Foundation::{HMODULE, LPARAM, RECT, WPARAM},
+        Foundation::{HMODULE, HWND, LPARAM, RECT, WPARAM},
         UI::{
-            Controls::{SBARS_SIZEGRIP, SB_SETPARTS, SB_SETTEXTW, STATUSCLASSNAMEW},
+            Controls::{SB_SETPARTS, SB_SETTEXTW, SBARS_SIZEGRIP, STATUSCLASSNAMEW},
             WindowsAndMessaging::{
-                CreateWindowExW, GetClientRect, SendMessageW, HMENU, WINDOW_EX_STYLE, WINDOW_STYLE,
-                WS_CHILD, WS_VISIBLE,
+                CreateWindowExW, GetClientRect, HMENU, SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_VISIBLE
             },
         },
-    },
+    }, core::{Result, w}
 };
 
-const STATUS_BAR_NUM_PARTS: usize = 2;
+const STATUS_BAR_NUM_PARTS: usize = 3;
 const STATUS_BAR_PART_PROCESS_COUNT: usize = 0;
-const STATUS_BAR_PART_PROCESS_MEMORY: usize = 1;
+const STATUS_BAR_PART_CPU_USAGE: usize = 1;
+const STATUS_BAR_PART_PROCESS_MEMORY: usize = 2;
 
 
-pub fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<WindowHandle> {
+pub fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
     let window_style = WINDOW_STYLE(SBARS_SIZEGRIP) | WS_CHILD | WS_VISIBLE;
     let hwnd = unsafe {
         CreateWindowExW(
@@ -32,7 +30,7 @@ pub fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<Window
             0,
             0,
             0,
-            parent.0,
+            parent,
             HMENU(crate::resources::ID_STATUS_BAR as *mut c_void),
             *instance,
             None,
@@ -40,7 +38,7 @@ pub fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<Window
     };
 
     let mut rect = RECT::default();
-    let _ = unsafe { GetClientRect(parent.0, &mut rect) };
+    let _ = unsafe { GetClientRect(parent, &mut rect) };
 
     let mut parts = [0; STATUS_BAR_NUM_PARTS as usize];
     let n_width = rect.right / (STATUS_BAR_NUM_PARTS as i32);
@@ -57,7 +55,7 @@ pub fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result<Window
             WPARAM(STATUS_BAR_NUM_PARTS),
             LPARAM(&raw mut parts as isize),
         );
-        Ok(WindowHandle::new(hwnd))
+        Ok(hwnd)
     }
 }
 
@@ -72,25 +70,25 @@ fn build_memory_status_string() -> Result<String> {
     ))
 }
 
-pub fn update(main_window: WindowHandle) {
-    let app_state = unsafe { crate::state::get(main_window) };
-    let app_state = app_state.borrow();
-    let status_bar = app_state.status_bar;
+pub fn update(main_window: HWND) {
+    let state = unsafe { crate::state::get(main_window) };
     set_text(
-        status_bar,
+        state.status_bar,
         STATUS_BAR_PART_PROCESS_COUNT,
-        &format!("Processes: {}", app_state.processes.len()),
+        &format!("Processes: {}", state.processes.len()),
     );
+    
+    set_text(state.status_bar, STATUS_BAR_PART_CPU_USAGE, "CPU Usage: Placeholder");
 
     let mem_status_string = build_memory_status_string().unwrap_or_default();
-    set_text(status_bar, STATUS_BAR_PART_PROCESS_MEMORY, &mem_status_string);
+    set_text(state.status_bar, STATUS_BAR_PART_PROCESS_MEMORY, &mem_status_string);
 }
 
-fn set_text(status_bar: WindowHandle, part: usize, text: &str) {
+fn set_text(status_bar: HWND, part: usize, text: &str) {
     let wide_text = widestring::U16CString::from_str(text).unwrap();
     unsafe {
         SendMessageW(
-            status_bar.0,
+            status_bar,
             SB_SETTEXTW,
             WPARAM(part),
             LPARAM(wide_text.as_ptr() as isize),
