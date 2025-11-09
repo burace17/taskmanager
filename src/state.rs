@@ -22,6 +22,7 @@ pub enum SortKey {
 
 pub struct TaskManagerState {
     pub task_list: WindowHandle,
+    pub status_bar: WindowHandle,
     pub processes: Vec<Process>,
     pub sort_state: SortState,
     pub pid_map: HashMap<u32, Process>,
@@ -38,9 +39,15 @@ pub unsafe fn get(hwnd: WindowHandle) -> Rc<RefCell<TaskManagerState>> {
 }
 
 // safety: GWLP_USERDATA for hwnd must be unset
-pub unsafe fn initialize(hwnd: WindowHandle, task_list_hwnd: WindowHandle, num_cpus: u32) {
+pub unsafe fn initialize(
+    hwnd: WindowHandle,
+    task_list_hwnd: WindowHandle,
+    status_bar_hwnd: WindowHandle,
+    num_cpus: u32,
+) {
     let app_state = Rc::new(RefCell::new(TaskManagerState {
         task_list: task_list_hwnd,
+        status_bar: status_bar_hwnd,
         processes: Vec::new(),
         sort_state: SortState::SortUp(SortKey::Name),
         pid_map: HashMap::new(),

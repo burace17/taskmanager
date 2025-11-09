@@ -10,6 +10,7 @@ use crate::{
     resources::{to_pcwstr, IDM_TASK_CONTEXT_MENU},
     state::{self, SortKey, SortState},
 };
+use human_bytes::human_bytes;
 use widestring::U16CString;
 use windows::{
     core::{w, Result, PWSTR},
@@ -32,9 +33,9 @@ use windows::{
                 WC_LISTVIEWW,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, LoadMenuW, MoveWindow,
-                SendMessageW, TrackPopupMenu, HMENU, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WS_BORDER,
-                WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
+                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, GetWindowRect, LoadMenuW,
+                MoveWindow, SendMessageW, TrackPopupMenu, HMENU, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
+                WM_SIZE, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
             },
         },
     },
@@ -86,7 +87,6 @@ pub unsafe fn create_control(instance: &HMODULE, parent: WindowHandle) -> Result
     );
 
     let handle = WindowHandle::new(hwnd);
-    resize_to_parent(handle, parent);
 
     add_column(handle, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
     add_column(handle, "PID", INDEX_PID, 50, LVCFMT_LEFT);
@@ -165,18 +165,27 @@ pub fn refresh_process_list(main_window: WindowHandle, invalidate_all: bool) {
     };
 }
 
-pub fn resize_to_parent(listview: WindowHandle, parent: WindowHandle) {
-    let mut rect = RECT::default();
+pub fn resize_to_parent(listview: WindowHandle, parent: WindowHandle, status_bar: WindowHandle) {
     unsafe {
-        let _ = GetClientRect(parent.0, &mut rect);
-    };
-    unsafe {
+        // Let status bar size itself first
+        SendMessageW(status_bar.0, WM_SIZE, WPARAM(0), LPARAM(0));
+
+        // Get client area of parent window
+        let mut client_rect = RECT::default();
+        let _ = GetClientRect(parent.0, &mut client_rect);
+
+        // Get status bar rect to determine its height
+        let mut status_rect = RECT::default();
+        let _ = GetWindowRect(status_bar.0, &mut status_rect);
+        let status_height = status_rect.bottom - status_rect.top;
+
+        // Size listview to fill client area minus status bar height
         let _ = MoveWindow(
             listview.0,
-            rect.left,
-            rect.top,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
+            0,
+            0,
+            client_rect.right,
+            client_rect.bottom - status_height,
             TRUE,
         );
     };
@@ -206,8 +215,7 @@ pub unsafe fn on_get_display_info(hwnd: WindowHandle, lparam: LPARAM) {
             copy_string_to_buffer(&cpu_s, lpdi.item.pszText, lpdi.item.cchTextMax);
         }
         INDEX_MEMORY => {
-            let mut ws_s = (process.private_working_set / 1024).to_string();
-            ws_s.push_str(" K");
+            let ws_s = human_bytes(process.private_working_set as f64);
             copy_string_to_buffer(&ws_s, lpdi.item.pszText, lpdi.item.cchTextMax);
         }
         _ => unreachable!(),
@@ -256,8 +264,8 @@ pub fn on_end_task_clicked(hwnd: WindowHandle) -> LRESULT {
 }
 
 fn add_column(task_list: WindowHandle, title: &str, order: i32, width: i32, fmt: LVCOLUMNW_FORMAT) {
-    let mut test = widestring::U16CString::from_str(title).unwrap();
-    let header = PWSTR::from_raw(test.as_mut_ptr());
+    let mut title = widestring::U16CString::from_str(title).unwrap();
+    let header = PWSTR::from_raw(title.as_mut_ptr());
     let mut column = LVCOLUMNW {
         mask: LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM,
         fmt,

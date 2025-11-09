@@ -17,4 +17,5 @@ pub const IDM_TASK_CONTEXT_MENU: u16 = 106;
 pub const IDD_ABOUTBOX: u16 = 107;
 
 pub const ID_TASK_LIST: i32 = 2000;
-pub const ID_UPDATE_TIMER: u32 = 2001;
+pub const ID_UPDATE_TIMER: i32 = 2001;
+pub const ID_STATUS_BAR: i32 = 2002;

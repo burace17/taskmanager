@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
 use std::{cell::RefCell, mem::transmute, rc::Rc};
 
@@ -32,6 +32,8 @@ mod process;
 mod resources;
 mod run_dialog;
 mod state;
+mod status_bar;
+mod system;
 mod task_list;
 mod window;
 
@@ -92,11 +94,17 @@ fn on_wm_create(hwnd: WindowHandle) -> LRESULT {
     unsafe {
         let instance = GetModuleHandleW(None).expect("shouldn't fail");
         let task_list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
+        let status_bar_hwnd = status_bar::create_control(&instance, hwnd).expect("shouldn't fail");
 
         let mut system_info = SYSTEM_INFO::default();
         GetSystemInfo(&mut system_info);
 
-        state::initialize(hwnd, task_list_hwnd, system_info.dwNumberOfProcessors);
+        state::initialize(
+            hwnd,
+            task_list_hwnd,
+            status_bar_hwnd,
+            system_info.dwNumberOfProcessors,
+        );
 
         task_list::refresh_process_list(hwnd, false);
         SetTimer(hwnd.0, ID_UPDATE_TIMER as usize, 500, None);
@@ -120,6 +128,7 @@ fn on_wm_destroy(hwnd: WindowHandle) -> LRESULT {
 
 fn on_wm_timer(hwnd: WindowHandle) -> LRESULT {
     task_list::refresh_process_list(hwnd, true);
+    status_bar::update(hwnd);
     LRESULT(0)
 }
 
@@ -168,7 +177,12 @@ unsafe fn on_wm_notify(hwnd: WindowHandle, wparam: WPARAM, lparam: LPARAM) -> LR
 fn on_wm_size(hwnd: WindowHandle) -> LRESULT {
     // safety: WM_CREATE will ensure the state has been stored in the window first
     let app_state = unsafe { state::get(hwnd) };
-    task_list::resize_to_parent(app_state.borrow().task_list, hwnd);
+    let app_state_borrow = app_state.borrow();
+    task_list::resize_to_parent(
+        app_state_borrow.task_list,
+        hwnd,
+        app_state_borrow.status_bar,
+    );
     LRESULT(0)
 }
 
