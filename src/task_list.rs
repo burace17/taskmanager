@@ -38,7 +38,7 @@ fn column_index_to_sort_key(sort_column_index: i32) -> SortKey {
     }
 }
 
-pub unsafe fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
+pub unsafe fn create_control(instance: &HINSTANCE, parent: HWND) -> Result<HWND> {
     let style = WS_TABSTOP | WS_CHILD | WS_BORDER | WS_VISIBLE;
     let lv_style = LVS_AUTOARRANGE | LVS_REPORT | LVS_OWNERDATA;
     let window_style = style | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(lv_style);
@@ -51,9 +51,9 @@ pub unsafe fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
         0,
         0,
         0,
-        parent,
-        HMENU(crate::resources::ID_TASK_LIST as *mut c_void),
-        *instance,
+        Some(parent),
+        Some(HMENU(crate::resources::ID_TASK_LIST as *mut c_void)),
+        Some(*instance),
         None,
     )?;
 
@@ -61,8 +61,8 @@ pub unsafe fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
     SendMessageW(
         hwnd,
         LVM_SETEXTENDEDLISTVIEWSTYLE,
-        WPARAM(extended_lv_style as usize),
-        LPARAM(extended_lv_style as isize),
+        Some(WPARAM(extended_lv_style as usize)),
+        Some(LPARAM(extended_lv_style as isize))
     );
 
     add_column(hwnd, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
@@ -82,7 +82,7 @@ fn lexical_str_cmp(a: &U16CString, b: &U16CString) -> Ordering {
             b.as_slice(),
             None,
             None,
-            LPARAM(0),
+            None,
         )
     };
     match result {
@@ -143,8 +143,8 @@ pub fn refresh_process_list(main_window: HWND, invalidate_all: bool) {
         SendMessageW(
             state.task_list,
             LVM_SETITEMCOUNT,
-            WPARAM(num_processes),
-            LPARAM(flags as isize),
+            Some(WPARAM(num_processes)),
+            Some(LPARAM(flags as isize)),
         );
     };
 }
@@ -152,7 +152,7 @@ pub fn refresh_process_list(main_window: HWND, invalidate_all: bool) {
 pub fn resize_to_parent(listview: HWND, parent: HWND, status_bar: HWND) {
     unsafe {
         // Let status bar size itself first
-        SendMessageW(status_bar, WM_SIZE, WPARAM(0), LPARAM(0));
+        SendMessageW(status_bar, WM_SIZE, None, None);
 
         // Get client area of parent window
         let mut client_rect = RECT::default();
@@ -170,7 +170,7 @@ pub fn resize_to_parent(listview: HWND, parent: HWND, status_bar: HWND) {
             0,
             client_rect.right,
             client_rect.bottom - status_height,
-            TRUE,
+            true,
         );
     };
 }
@@ -220,12 +220,12 @@ pub fn on_show_contextmenu(hwnd: HWND, x: i32, y: i32) {
             return;
         }
 
-        let instance = GetModuleHandleW(None).expect("shouldn't fail");
+        let instance = HINSTANCE(GetModuleHandleW(None).expect("shouldn't fail").0);
         let menu_load =
-            LoadMenuW(instance, to_pcwstr(IDM_TASK_CONTEXT_MENU)).expect("shouldn't fail");
+            LoadMenuW(Some(instance), to_pcwstr(IDM_TASK_CONTEXT_MENU)).expect("shouldn't fail");
         let menu = GetSubMenu(menu_load, 0);
         // FIXME: should call GetSystemMetrics to find the correct context menu alignment
-        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, hwnd, None);
+        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, None, hwnd, None);
         DestroyMenu(menu_load).expect("shouldn't fail");
     }
 }
@@ -259,8 +259,8 @@ fn add_column(task_list: HWND, title: &str, order: i32, width: i32, fmt: LVCOLUM
         SendMessageW(
             task_list,
             LVM_INSERTCOLUMN,
-            WPARAM(order as usize),
-            LPARAM(&raw mut column as isize),
+            Some(WPARAM(order as usize)),
+            Some(LPARAM(&raw mut column as isize)),
         )
     };
 }
@@ -281,8 +281,8 @@ fn get_selected_task(list_hwnd: HWND) -> isize {
         SendMessageW(
             list_hwnd,
             LVM_GETNEXTITEM,
-            WPARAM(-1_isize as usize),
-            LPARAM(LVNI_SELECTED as isize),
+            Some(WPARAM(-1_isize as usize)),
+            Some(LPARAM(LVNI_SELECTED as isize)),
         )
     };
     result.0
@@ -302,7 +302,7 @@ unsafe fn toggle_sort_order(hwnd: HWND, sort_column_index: i32) {
 
     state::set_sort_state(hwnd, new_sort);
 
-    let header = SendMessageW(state.task_list, LVM_GETHEADER, WPARAM(0), LPARAM(0));
+    let header = SendMessageW(state.task_list, LVM_GETHEADER, None, None);
     if header.0 == INVALID_HANDLE_VALUE.0 as isize {
         println!("LVM_GETHEADER failed");
         return;
@@ -318,8 +318,8 @@ unsafe fn toggle_sort_order(hwnd: HWND, sort_column_index: i32) {
         let result = SendMessageW(
             header,
             HDM_GETITEM,
-            WPARAM(column_index),
-            LPARAM(&raw mut column as isize),
+            Some(WPARAM(column_index)),
+            Some(LPARAM(&raw mut column as isize)),
         );
         if result.0 == 0 {
             println!("HDM_GETITEM failed for column: {}", column_index);
@@ -338,8 +338,8 @@ unsafe fn toggle_sort_order(hwnd: HWND, sort_column_index: i32) {
         let result = SendMessageW(
             header,
             HDM_SETITEM,
-            WPARAM(column_index),
-            LPARAM(&raw mut column as isize),
+            Some(WPARAM(column_index)),
+            Some(LPARAM(&raw mut column as isize)),
         );
         if result.0 == 0 {
             println!("HDM_SETITEM failed for column: {}", column_index);

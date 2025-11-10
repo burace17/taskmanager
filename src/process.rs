@@ -4,7 +4,7 @@ use widestring::U16CString;
 use windows::{
     core::{Result, PCWSTR, PWSTR},
     Win32::{
-        Foundation::{CloseHandle, FALSE, FILETIME, HANDLE},
+        Foundation::{CloseHandle, FILETIME, HANDLE},
         System::{
             ProcessStatus::{
                 EnumProcesses, GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
@@ -89,7 +89,7 @@ unsafe fn get_process_cpu_time(process: HANDLE) -> Result<u64> {
 }
 
 fn open_process(pid: &u32) -> Option<(u32, HANDLE)> {
-    let result = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, *pid) };
+    let result = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, *pid) };
     if let Ok(handle) = result {
         Some((*pid, handle))
     } else {
@@ -154,7 +154,7 @@ pub fn get_cpu_usage(sample1: &Process, sample2: &Process, num_cpus: u32) -> u64
 
 pub fn kill_process(pid: u32) -> Result<()> {
     unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid)?;
+        let handle = OpenProcess(PROCESS_TERMINATE, false, pid)?;
         TerminateProcess(handle, 1)?;
         CloseHandle(handle)?;
         Ok(())

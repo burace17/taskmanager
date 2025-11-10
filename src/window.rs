@@ -1,20 +1,19 @@
 use windows::{
-    core::{w, Result, PCWSTR},
     Win32::{
-        Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
         UI::{
-            Controls::{InitCommonControlsEx, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX},
+            Controls::{ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx},
             WindowsAndMessaging::*,
         },
-    },
+    }, core::{PCWSTR, Result, w}
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
 
 type WndProc = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
 
-pub unsafe fn register_class(instance: &HMODULE, name: &PCWSTR, wndproc: WndProc) -> Result<()> {
+pub unsafe fn register_class(instance: &HINSTANCE, name: &PCWSTR, wndproc: WndProc) -> Result<()> {
     let wc = WNDCLASSEXW {
         cbSize: size_of::<WNDCLASSEXW>() as u32,
         style: CS_HREDRAW | CS_VREDRAW,
@@ -31,7 +30,7 @@ pub unsafe fn register_class(instance: &HMODULE, name: &PCWSTR, wndproc: WndProc
     Ok(())
 }
 
-pub unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
+pub unsafe fn create_window(instance: &HINSTANCE, name: &PCWSTR) -> Result<()> {
     let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE::default(),
         *name,
@@ -43,7 +42,7 @@ pub unsafe fn create_window(instance: &HMODULE, name: &PCWSTR) -> Result<()> {
         600,
         None,
         None,
-        *instance,
+        Some(*instance),
         None,
     )?;
     let _ = ShowWindow(hwnd, SW_SHOW);

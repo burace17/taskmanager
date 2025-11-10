@@ -4,9 +4,8 @@ use std::mem::transmute;
 
 use resources::{FALSE, IDD_ABOUTBOX, ID_UPDATE_TIMER, TRUE};
 use windows::{
-    core::{w, Result},
     Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         System::{
             LibraryLoader::GetModuleHandleW,
             SystemInformation::{GetSystemInfo, SYSTEM_INFO},
@@ -15,7 +14,7 @@ use windows::{
             Controls::{LVN_COLUMNCLICK, LVN_GETDISPINFO, NMHDR},
             WindowsAndMessaging::*,
         },
-    },
+    }, core::{Result, w}
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
@@ -31,14 +30,14 @@ mod window;
 
 fn main() -> Result<()> {
     unsafe {
-        let instance = GetModuleHandleW(None)?;
+        let instance = HINSTANCE(GetModuleHandleW(None)?.0);
 
         let window_class = w!("window");
         window::init_common_controls();
         window::register_class(&instance, &window_class, wndproc)?;
         window::create_window(&instance, &window_class)?;
 
-        let accel = LoadAcceleratorsW(instance, to_pcwstr(IDC_TASKMANAGER))?;
+        let accel = LoadAcceleratorsW(Some(instance), to_pcwstr(IDC_TASKMANAGER))?;
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).into() {
             if TranslateAcceleratorW(message.hwnd, accel, &message) == 0 {
@@ -83,7 +82,7 @@ unsafe extern "system" fn aboutdlgproc(
 
 fn on_wm_create(hwnd: HWND) -> LRESULT {
     unsafe {
-        let instance = GetModuleHandleW(None).expect("shouldn't fail");
+        let instance = HINSTANCE(GetModuleHandleW(None).expect("shouldn't fail").0);
         let task_list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
         let status_bar_hwnd = status_bar::create_control(&instance, hwnd).expect("shouldn't fail");
 
@@ -98,14 +97,14 @@ fn on_wm_create(hwnd: HWND) -> LRESULT {
         );
 
         task_list::refresh_process_list(hwnd, false);
-        SetTimer(hwnd, ID_UPDATE_TIMER as usize, 500, None);
+        SetTimer(Some(hwnd), ID_UPDATE_TIMER as usize, 500, None);
     }
     LRESULT(0)
 }
 
 fn on_wm_destroy(hwnd: HWND) -> LRESULT {
     unsafe {
-        let _ = KillTimer(hwnd, ID_UPDATE_TIMER as usize);
+        let _ = KillTimer(Some(hwnd), ID_UPDATE_TIMER as usize);
         state::destroy(hwnd);
         PostQuitMessage(0);
         LRESULT(0)
@@ -132,11 +131,11 @@ unsafe fn on_wm_command(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             LRESULT(0)
         }
         resources::IDM_ABOUT => {
-            let instance = GetModuleHandleW(None).expect("shouldn't fail");
+            let instance = HINSTANCE(GetModuleHandleW(None).expect("shouldn't fail").0);
             let _ = DialogBoxParamW(
-                instance,
+                Some(instance),
                 to_pcwstr(IDD_ABOUTBOX),
-                hwnd,
+                Some(hwnd),
                 Some(aboutdlgproc),
                 LPARAM(0),
             );
