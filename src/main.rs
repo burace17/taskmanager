@@ -13,13 +13,7 @@ use windows::{
         },
         UI::{
             Controls::{LVN_COLUMNCLICK, LVN_GETDISPINFO, NMHDR},
-            WindowsAndMessaging::{
-                DefWindowProcW, DestroyWindow, DialogBoxParamW, DispatchMessageW, EndDialog,
-                GetMessageW, KillTimer, LoadAcceleratorsW, PostQuitMessage,
-                SetTimer, TranslateAcceleratorW, TranslateMessage,
-                MSG, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY,
-                WM_INITDIALOG, WM_NOTIFY, WM_SIZE, WM_TIMER,
-            },
+            WindowsAndMessaging::*,
         },
     },
 };
@@ -169,11 +163,7 @@ unsafe fn on_wm_notify(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 fn on_wm_size(hwnd: HWND) -> LRESULT {
     // safety: WM_CREATE will ensure the state has been stored in the window first
     let state = unsafe { state::get(hwnd) };
-    task_list::resize_to_parent(
-        state.task_list,
-        hwnd,
-        state.status_bar,
-    );
+    task_list::resize_to_parent(state.task_list, hwnd, state.status_bar);
     LRESULT(0)
 }
 

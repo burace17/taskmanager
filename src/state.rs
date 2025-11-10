@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use im::HashMap;
+use std::collections::HashMap;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
 };
@@ -75,12 +75,7 @@ pub unsafe fn set_sort_state(hwnd: HWND, new_sort: SortState) {
     });
 }
 
-pub unsafe fn initialize(
-    hwnd: HWND,
-    task_list_hwnd: HWND,
-    status_bar_hwnd: HWND,
-    num_cpus: u32,
-) {
+pub unsafe fn initialize(hwnd: HWND, task_list_hwnd: HWND, status_bar_hwnd: HWND, num_cpus: u32) {
     let state = TaskManagerState {
         task_list: task_list_hwnd,
         status_bar: status_bar_hwnd,

@@ -4,8 +4,10 @@ use windows::{
 };
 
 pub fn get_memory_status() -> Result<MEMORYSTATUSEX> {
-    let mut memory_status = MEMORYSTATUSEX::default();
-    memory_status.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+    let mut memory_status = MEMORYSTATUSEX {
+        dwLength: size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
     unsafe { GlobalMemoryStatusEx(&mut memory_status)? }
     Ok(memory_status)
 }

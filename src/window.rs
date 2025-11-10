@@ -1,14 +1,13 @@
 use windows::{
+    core::{w, Result, PCWSTR},
     Win32::{
         Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
         UI::{
-            Controls::{ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx},
-            WindowsAndMessaging::{
-                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, IDC_ARROW, LoadCursorW, RegisterClassExW, SW_SHOW, ShowWindow, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_VISIBLE
-            },
+            Controls::{InitCommonControlsEx, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX},
+            WindowsAndMessaging::*,
         },
-    }, core::{PCWSTR, Result, w}
+    },
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};

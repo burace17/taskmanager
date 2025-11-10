@@ -1,7 +1,8 @@
 use std::{
-    cmp::{Ordering, min},
+    cmp::{min, Ordering},
     ffi::c_void,
-    mem::transmute, rc::Rc,
+    mem::transmute,
+    rc::Rc,
 };
 
 use crate::{
@@ -12,21 +13,13 @@ use crate::{
 use human_bytes::human_bytes;
 use widestring::U16CString;
 use windows::{
+    core::{w, Result, PWSTR},
     Win32::{
-        Foundation::{HMODULE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, RECT, TRUE, WPARAM},
-        Globalization::{
-            COMPARE_STRING_FLAGS, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringEx, LOCALE_NAME_SYSTEM_DEFAULT
-        },
+        Foundation::*,
+        Globalization::*,
         System::LibraryLoader::GetModuleHandleW,
-        UI::{
-            Controls::{
-                HDF_SORTDOWN, HDF_SORTUP, HDF_STRING, HDI_FORMAT, HDITEMW, HDM_GETITEM, HDM_SETITEM, HEADER_CONTROL_FORMAT_FLAGS, LIST_VIEW_ITEM_FLAGS, LVCF_FMT, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVCFMT_LEFT, LVCFMT_RIGHT, LVCOLUMNW, LVCOLUMNW_FORMAT, LVIF_TEXT, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMN, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVNI_SELECTED, LVS_AUTOARRANGE, LVS_EX_DOUBLEBUFFER, LVS_EX_FULLROWSELECT, LVS_OWNERDATA, LVS_REPORT, LVSICF_NOINVALIDATEALL, LVSICF_NOSCROLL, NMLISTVIEW, NMLVDISPINFOW, WC_LISTVIEWW
-            },
-            WindowsAndMessaging::{
-                CreateWindowExW, DestroyMenu, GetClientRect, GetSubMenu, GetWindowRect, HMENU, LoadMenuW, MoveWindow, SendMessageW, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, WM_SIZE, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE
-            },
-        },
-    }, core::{PWSTR, Result, w}
+        UI::{Controls::*, WindowsAndMessaging::*},
+    },
 };
 
 const INDEX_NAME: i32 = 0;
@@ -102,10 +95,20 @@ fn lexical_str_cmp(a: &U16CString, b: &U16CString) -> Ordering {
 
 fn sort_process_list(processes: &mut [std::rc::Rc<Process>], sort_key: SortKey) {
     match sort_key {
-        SortKey::Name => processes.sort_by(|a, b| lexical_str_cmp(&a.image_name, &b.image_name)),
+        SortKey::Name => processes.sort_by(|a, b| {
+            lexical_str_cmp(&a.image_name, &b.image_name).then_with(|| a.pid.cmp(&b.pid))
+        }),
         SortKey::Pid => processes.sort_by_key(|k| k.pid),
-        SortKey::Cpu => processes.sort_by_key(|k| k.cpu_usage),
-        SortKey::Memory => processes.sort_by_key(|k| k.private_working_set),
+        SortKey::Cpu => processes.sort_by(|a, b| {
+            a.cpu_usage
+                .cmp(&b.cpu_usage)
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
+        SortKey::Memory => processes.sort_by(|a, b| {
+            a.private_working_set
+                .cmp(&b.private_working_set)
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
     }
 }
 
@@ -113,12 +116,11 @@ fn sort_process_list(processes: &mut [std::rc::Rc<Process>], sort_key: SortKey) 
 pub fn refresh_process_list(main_window: HWND, invalidate_all: bool) {
     let state = unsafe { state::get(main_window) };
 
-    let mut new_pid_map = state.pid_map.clone();
-    process::get_processes(&state, &mut new_pid_map).unwrap();
-    
-    let mut new_process_list: Vec<Rc<Process>> = new_pid_map.iter().map(|(_, process)| process.clone()).collect();
+    let new_pid_map = process::get_processes(&state).unwrap();
+
+    let mut new_process_list: Vec<Rc<Process>> = new_pid_map.values().cloned().collect();
     let num_processes = new_process_list.len();
-    
+
     match state.sort_state {
         SortState::SortUp(sort_key) => sort_process_list(&mut new_process_list, sort_key),
         SortState::SortDown(sort_key) => {
@@ -126,17 +128,17 @@ pub fn refresh_process_list(main_window: HWND, invalidate_all: bool) {
             new_process_list.reverse();
         }
     }
-    
+
     unsafe {
         state::update_processes(main_window, new_process_list, new_pid_map);
     }
-    
+
     let flags = if invalidate_all {
         LVSICF_NOSCROLL
     } else {
         LVSICF_NOSCROLL | LVSICF_NOINVALIDATEALL
     };
-    
+
     unsafe {
         SendMessageW(
             state.task_list,
@@ -292,18 +294,14 @@ const HEADER_NO_SORT_FORMAT: i32 = HDF_STRING.0;
 
 unsafe fn toggle_sort_order(hwnd: HWND, sort_column_index: i32) {
     let state = state::get(hwnd);
-    
+
     let new_sort = match state.sort_state {
-        SortState::SortUp(_) => {
-            SortState::SortDown(column_index_to_sort_key(sort_column_index))
-        }
-        SortState::SortDown(_) => {
-            SortState::SortUp(column_index_to_sort_key(sort_column_index))
-        }
+        SortState::SortUp(_) => SortState::SortDown(column_index_to_sort_key(sort_column_index)),
+        SortState::SortDown(_) => SortState::SortUp(column_index_to_sort_key(sort_column_index)),
     };
-    
+
     state::set_sort_state(hwnd, new_sort);
-    
+
     let header = SendMessageW(state.task_list, LVM_GETHEADER, WPARAM(0), LPARAM(0));
     if header.0 == INVALID_HANDLE_VALUE.0 as isize {
         println!("LVM_GETHEADER failed");

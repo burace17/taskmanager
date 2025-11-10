@@ -1,6 +1,5 @@
-use std::{mem::transmute, time::Instant};
+use std::{collections::HashMap, mem::transmute, time::Instant};
 
-use im::HashMap;
 use widestring::U16CString;
 use windows::{
     core::{Result, PCWSTR, PWSTR},
@@ -112,7 +111,7 @@ unsafe fn query_process_information(pid: u32, process: HANDLE) -> Result<Process
     })
 }
 
-pub fn get_processes(state: &TaskManagerState, process_list: &mut HashMap<u32, std::rc::Rc<Process>>) -> Result<()> {
+pub fn get_processes(state: &TaskManagerState) -> Result<HashMap<u32, std::rc::Rc<Process>>> {
     let mut pid_list: [u32; 1024] = [0; 1024];
     let cb = size_of_val(&pid_list) as u32;
     let mut cb_needed: u32 = 0;
@@ -125,23 +124,20 @@ pub fn get_processes(state: &TaskManagerState, process_list: &mut HashMap<u32, s
         println!("might need a bigger array...");
     }
 
+    let mut process_map = HashMap::new();
     for (pid, process_handle) in pid_list.iter().filter_map(open_process) {
         if let Ok(mut process) = unsafe { query_process_information(pid, process_handle) } {
-            
-            if let Some(old_process) = process_list.get(&pid) {
-                process.cpu_usage = get_cpu_usage(
-                    old_process, 
-                    &process,
-                    state.num_cpus,
-                );
+            if let Some(old_process) = state.pid_map.get(&pid) {
+                process.cpu_usage = get_cpu_usage(old_process, &process, state.num_cpus);
             }
-            process_list.insert(pid, std::rc::Rc::new(process));
+            process_map.insert(pid, std::rc::Rc::new(process));
         }
         unsafe {
             let _ = CloseHandle(process_handle);
         };
     }
-    Ok(())
+
+    Ok(process_map)
 }
 
 pub fn get_cpu_usage(sample1: &Process, sample2: &Process, num_cpus: u32) -> u64 {

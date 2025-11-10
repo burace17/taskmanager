@@ -1,22 +1,23 @@
 use human_bytes::human_bytes;
 use std::ffi::c_void;
 use windows::{
+    core::{w, Result},
     Win32::{
         Foundation::{HMODULE, HWND, LPARAM, RECT, WPARAM},
         UI::{
-            Controls::{SB_SETPARTS, SB_SETTEXTW, SBARS_SIZEGRIP, STATUSCLASSNAMEW},
+            Controls::{SBARS_SIZEGRIP, SB_SETPARTS, SB_SETTEXTW, STATUSCLASSNAMEW},
             WindowsAndMessaging::{
-                CreateWindowExW, GetClientRect, HMENU, SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_VISIBLE
+                CreateWindowExW, GetClientRect, SendMessageW, HMENU, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WS_CHILD, WS_VISIBLE,
             },
         },
-    }, core::{Result, w}
+    },
 };
 
 const STATUS_BAR_NUM_PARTS: usize = 3;
 const STATUS_BAR_PART_PROCESS_COUNT: usize = 0;
 const STATUS_BAR_PART_CPU_USAGE: usize = 1;
 const STATUS_BAR_PART_PROCESS_MEMORY: usize = 2;
-
 
 pub fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
     let window_style = WINDOW_STYLE(SBARS_SIZEGRIP) | WS_CHILD | WS_VISIBLE;
@@ -40,11 +41,11 @@ pub fn create_control(instance: &HMODULE, parent: HWND) -> Result<HWND> {
     let mut rect = RECT::default();
     let _ = unsafe { GetClientRect(parent, &mut rect) };
 
-    let mut parts = [0; STATUS_BAR_NUM_PARTS as usize];
+    let mut parts = [0; STATUS_BAR_NUM_PARTS];
     let n_width = rect.right / (STATUS_BAR_NUM_PARTS as i32);
     let mut right_edge = n_width;
-    for i in 0..STATUS_BAR_NUM_PARTS {
-        parts[i] = right_edge;
+    for part in parts.iter_mut().take(STATUS_BAR_NUM_PARTS) {
+        *part = right_edge;
         right_edge += n_width;
     }
 
@@ -77,11 +78,19 @@ pub fn update(main_window: HWND) {
         STATUS_BAR_PART_PROCESS_COUNT,
         &format!("Processes: {}", state.processes.len()),
     );
-    
-    set_text(state.status_bar, STATUS_BAR_PART_CPU_USAGE, "CPU Usage: Placeholder");
+
+    set_text(
+        state.status_bar,
+        STATUS_BAR_PART_CPU_USAGE,
+        "CPU Usage: Placeholder",
+    );
 
     let mem_status_string = build_memory_status_string().unwrap_or_default();
-    set_text(state.status_bar, STATUS_BAR_PART_PROCESS_MEMORY, &mem_status_string);
+    set_text(
+        state.status_bar,
+        STATUS_BAR_PART_PROCESS_MEMORY,
+        &mem_status_string,
+    );
 }
 
 fn set_text(status_bar: HWND, part: usize, text: &str) {
