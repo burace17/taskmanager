@@ -4,6 +4,7 @@ use std::mem::transmute;
 
 use resources::{FALSE, IDD_ABOUTBOX, ID_UPDATE_TIMER, TRUE};
 use windows::{
+    core::{w, Result},
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         System::{
@@ -14,7 +15,7 @@ use windows::{
             Controls::{LVN_COLUMNCLICK, LVN_GETDISPINFO, NMHDR},
             WindowsAndMessaging::*,
         },
-    }, core::{Result, w}
+    },
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
@@ -27,6 +28,8 @@ mod status_bar;
 mod system;
 mod task_list;
 mod window;
+
+const REFRESH_INTERVAL_MS: u32 = 1000;
 
 fn main() -> Result<()> {
     unsafe {
@@ -85,6 +88,7 @@ fn on_wm_create(hwnd: HWND) -> LRESULT {
         let instance = HINSTANCE(GetModuleHandleW(None).expect("shouldn't fail").0);
         let task_list_hwnd = task_list::create_control(&instance, hwnd).expect("shouldn't fail");
         let status_bar_hwnd = status_bar::create_control(&instance, hwnd).expect("shouldn't fail");
+        let (query, counter) = system::start_query_data_collection().expect("shouldn't fail");
 
         let mut system_info = SYSTEM_INFO::default();
         GetSystemInfo(&mut system_info);
@@ -94,10 +98,13 @@ fn on_wm_create(hwnd: HWND) -> LRESULT {
             task_list_hwnd,
             status_bar_hwnd,
             system_info.dwNumberOfProcessors,
+            query,
+            counter,
         );
 
         task_list::refresh_process_list(hwnd, false);
-        SetTimer(Some(hwnd), ID_UPDATE_TIMER as usize, 500, None);
+        let _ = on_wm_timer(hwnd);
+        SetTimer(Some(hwnd), ID_UPDATE_TIMER as usize, REFRESH_INTERVAL_MS, None);
     }
     LRESULT(0)
 }
@@ -112,6 +119,8 @@ fn on_wm_destroy(hwnd: HWND) -> LRESULT {
 }
 
 fn on_wm_timer(hwnd: HWND) -> LRESULT {
+    let state = unsafe { state::get(hwnd) };
+    let _ = system::collect_query_data(state.pdh_query);
     task_list::refresh_process_list(hwnd, true);
     status_bar::update(hwnd);
     LRESULT(0)

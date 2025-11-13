@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
 use std::collections::HashMap;
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
+use windows::Win32::{
+    System::Performance::{PDH_HCOUNTER, PDH_HQUERY},
+    UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA},
 };
 
 use crate::{process::Process, HWND};
@@ -27,6 +28,9 @@ pub struct TaskManagerState {
     pub status_bar: HWND,
     pub num_cpus: u32,
     pub sort_state: SortState,
+
+    pub pdh_query: PDH_HQUERY,
+    pub pdh_cpu_usage_counter: PDH_HCOUNTER,
 
     pub processes: Vec<Rc<Process>>,
     pub pid_map: HashMap<u32, Rc<Process>>,
@@ -59,6 +63,8 @@ pub unsafe fn update_processes(
         status_bar: old.status_bar,
         num_cpus: old.num_cpus,
         sort_state: old.sort_state,
+        pdh_query: old.pdh_query,
+        pdh_cpu_usage_counter: old.pdh_cpu_usage_counter,
         processes: new_processes,
         pid_map: new_pid_map,
     });
@@ -70,17 +76,28 @@ pub unsafe fn set_sort_state(hwnd: HWND, new_sort: SortState) {
         status_bar: old.status_bar,
         num_cpus: old.num_cpus,
         sort_state: new_sort,
+        pdh_query: old.pdh_query,
+        pdh_cpu_usage_counter: old.pdh_cpu_usage_counter,
         processes: old.processes.clone(),
         pid_map: old.pid_map.clone(),
     });
 }
 
-pub unsafe fn initialize(hwnd: HWND, task_list_hwnd: HWND, status_bar_hwnd: HWND, num_cpus: u32) {
+pub unsafe fn initialize(
+    hwnd: HWND,
+    task_list_hwnd: HWND,
+    status_bar_hwnd: HWND,
+    num_cpus: u32,
+    query: PDH_HQUERY,
+    counter: PDH_HCOUNTER,
+) {
     let state = TaskManagerState {
         task_list: task_list_hwnd,
         status_bar: status_bar_hwnd,
         num_cpus,
         sort_state: SortState::SortUp(SortKey::Name),
+        pdh_query: query,
+        pdh_cpu_usage_counter: counter,
         processes: Vec::new(),
         pid_map: HashMap::new(),
     };
@@ -92,7 +109,9 @@ pub unsafe fn initialize(hwnd: HWND, task_list_hwnd: HWND, status_bar_hwnd: HWND
 pub unsafe fn destroy(hwnd: HWND) {
     let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut TaskManagerState;
     if !state_ptr.is_null() {
-        drop(Box::from_raw(state_ptr));
+        let state = Box::from_raw(state_ptr);
+        crate::system::end_query_data_collection(state.pdh_query);
+        drop(state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
     }
 }

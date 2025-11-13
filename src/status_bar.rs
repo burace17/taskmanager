@@ -1,15 +1,17 @@
 use human_bytes::human_bytes;
 use std::ffi::c_void;
 use windows::{
+    core::{w, Result},
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, RECT, WPARAM},
         UI::{
-            Controls::{SB_SETPARTS, SB_SETTEXTW, SBARS_SIZEGRIP, STATUSCLASSNAMEW},
+            Controls::{SBARS_SIZEGRIP, SB_SETPARTS, SB_SETTEXTW, STATUSCLASSNAMEW},
             WindowsAndMessaging::{
-                CreateWindowExW, GetClientRect, HMENU, SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_VISIBLE
+                CreateWindowExW, GetClientRect, SendMessageW, HMENU, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WS_CHILD, WS_VISIBLE,
             },
         },
-    }, core::{Result, w}
+    },
 };
 
 const STATUS_BAR_NUM_PARTS: usize = 3;
@@ -77,11 +79,14 @@ pub fn update(main_window: HWND) {
         &format!("Processes: {}", state.processes.len()),
     );
 
-    set_text(
-        state.status_bar,
-        STATUS_BAR_PART_CPU_USAGE,
-        "CPU Usage: Placeholder",
-    );
+    let cpu_usage_str =
+        if let Ok(cpu_usage) = crate::system::get_cpu_usage(state.pdh_cpu_usage_counter) {
+            &format!("CPU Usage: {}%", cpu_usage as i32)
+        } else {
+            "CPU usage unavailable"
+        };
+
+    set_text(state.status_bar, STATUS_BAR_PART_CPU_USAGE, cpu_usage_str);
 
     let mem_status_string = build_memory_status_string().unwrap_or_default();
     set_text(

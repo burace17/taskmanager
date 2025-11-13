@@ -1,12 +1,13 @@
 use windows::{
+    core::{w, Result, PCWSTR},
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::UpdateWindow,
         UI::{
-            Controls::{ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx},
+            Controls::{InitCommonControlsEx, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX},
             WindowsAndMessaging::*,
         },
-    }, core::{PCWSTR, Result, w}
+    },
 };
 
 use crate::resources::{to_pcwstr, IDC_TASKMANAGER};
@@ -20,7 +21,7 @@ pub unsafe fn register_class(instance: &HINSTANCE, name: &PCWSTR, wndproc: WndPr
         lpszClassName: *name,
         hCursor: LoadCursorW(None, IDC_ARROW)?,
         lpfnWndProc: Some(wndproc),
-        hInstance: (*instance).into(),
+        hInstance: *instance,
         lpszMenuName: to_pcwstr(IDC_TASKMANAGER),
         ..Default::default()
     };

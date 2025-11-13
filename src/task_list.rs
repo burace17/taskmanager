@@ -62,7 +62,7 @@ pub unsafe fn create_control(instance: &HINSTANCE, parent: HWND) -> Result<HWND>
         hwnd,
         LVM_SETEXTENDEDLISTVIEWSTYLE,
         Some(WPARAM(extended_lv_style as usize)),
-        Some(LPARAM(extended_lv_style as isize))
+        Some(LPARAM(extended_lv_style as isize)),
     );
 
     add_column(hwnd, "Name", INDEX_NAME, 400, LVCFMT_LEFT);
@@ -225,7 +225,15 @@ pub fn on_show_contextmenu(hwnd: HWND, x: i32, y: i32) {
             LoadMenuW(Some(instance), to_pcwstr(IDM_TASK_CONTEXT_MENU)).expect("shouldn't fail");
         let menu = GetSubMenu(menu_load, 0);
         // FIXME: should call GetSystemMetrics to find the correct context menu alignment
-        let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, None, hwnd, None);
+        let _ = TrackPopupMenu(
+            menu,
+            TPM_LEFTALIGN | TPM_RIGHTBUTTON,
+            x,
+            y,
+            None,
+            hwnd,
+            None,
+        );
         DestroyMenu(menu_load).expect("shouldn't fail");
     }
 }
